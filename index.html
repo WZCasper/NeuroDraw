@@ -3,8 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>NeuroDraw — Честный розыгрыш для стримеров</title>
-<meta name="description" content="NeuroDraw — бесплатный сервис для проведения розыгрышей и подведения итогов конкурсов среди зрителей YouTube, Twitch, TikTok и Instagram.">
+<title>NeuroDraw — честный розыгрыш для стримеров</title>
+<meta name="description" content="NeuroDraw — бесплатный сервис для проведения розыгрышей и подведения итогов конкурсов среди зрителей YouTube, Twitch, TikTok и Instagram. Честно, красиво, без регистрации.">
+<meta name="theme-color" content="#4F46E5">
 
 <!-- Google Fonts: Inter -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -13,10 +14,20 @@
 
 <link rel="stylesheet" href="style.css">
 
-<!-- Фавикон в виде простого SVG-индикатора, без внешних файлов -->
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%234F46E5'/%3E%3Ccircle cx='16' cy='16' r='7' fill='none' stroke='white' stroke-width='3'/%3E%3Ccircle cx='23' cy='9' r='3' fill='%2322D3EE'/%3E%3C/svg%3E">
+<!-- Фавикон сайта (логотип NeuroDraw) -->
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="apple-touch-icon" href="favicon.png">
 </head>
 <body>
+
+<!-- Декоративный анимированный фон (чистые CSS-blur-пятна, без картинок, лёгкий для GPU) -->
+<div class="bg-aurora" aria-hidden="true">
+  <span class="bg-blob bg-blob-1"></span>
+  <span class="bg-blob bg-blob-2"></span>
+  <span class="bg-blob bg-blob-3"></span>
+  <span class="bg-blob bg-blob-4"></span>
+  <span class="bg-grain"></span>
+</div>
 
 <!-- ============================================================
      ШАПКА (HEADER)
@@ -26,7 +37,7 @@
 
     <div class="brand">
       <span class="brand-mark" aria-hidden="true">
-        <span class="brand-mark-dot"></span>
+        <img src="favicon.png" alt="" class="brand-mark-img" width="36" height="36">
       </span>
       <span class="brand-name">NeuroDraw</span>
     </div>
@@ -63,6 +74,39 @@
     <a class="btn-support" href="https://www.donationalerts.com/r/wz_casper" target="_blank" rel="noopener noreferrer">Поддержать проект</a>
   </div>
 </header>
+
+<!-- ============================================================
+     HERO — креативное описание сервиса
+     ============================================================ -->
+<section class="hero" aria-label="О сервисе">
+  <div class="hero-inner">
+    <span class="hero-kicker">
+      <span class="hero-kicker-dot" aria-hidden="true"></span>
+      Нейросправедливый рандом для стримеров
+    </span>
+    <h1 class="hero-title">
+      Розыгрыш, которому <span class="hero-title-accent">доверяют</span> зрители
+    </h1>
+    <p class="hero-subtitle">
+      Загрузите список ников — NeuroDraw честно и красиво выберет победителя прямо в прямом эфире.
+      Ни скриптов на удачу, ни сомнений в чате: один клик — и результат виден всем.
+    </p>
+    <div class="hero-pills">
+      <span class="hero-pill">
+        <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M10 2L12.2 7.2L18 7.8L13.6 11.5L15 17.2L10 14L5 17.2L6.4 11.5L2 7.8L7.8 7.2L10 2Z" fill="currentColor"/></svg>
+        Бесплатно навсегда
+      </span>
+      <span class="hero-pill">
+        <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="10" cy="10" r="7.2" stroke="currentColor" stroke-width="1.6"/><path d="M10 6v4l2.6 2.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        Без регистрации
+      </span>
+      <span class="hero-pill">
+        <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><rect x="3" y="3" width="14" height="14" rx="4" stroke="currentColor" stroke-width="1.6"/><path d="M6.5 10l2.3 2.3L13.8 7.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        YouTube · Twitch · TikTok · Instagram
+      </span>
+    </div>
+  </div>
+</section>
 
 <!-- ============================================================
      ОСНОВНОЙ КОНТЕНТ
@@ -181,9 +225,6 @@ stream_queen
     <button class="btn-spin" id="spinBtn" disabled>
       <span id="spinBtnLabel">Выбрать победителя</span>
     </button>
-
-    <!-- Скрытый пиксель-триггер админ-режима (угол экрана) -->
-    <button class="hidden-admin-pixel" id="hiddenAdminPixel" aria-label="" tabindex="-1"></button>
   </section>
 
 </main>
@@ -218,44 +259,16 @@ stream_queen
 </div>
 
 <!-- ============================================================
-     СКРЫТОЕ АДМИН-ОКНО: ЗАДАННЫЙ ПОБЕДИТЕЛЬ (Shift + F8)
-     ============================================================ -->
-<div class="modal-overlay" id="adminModal" hidden>
-  <div class="modal-admin" role="dialog" aria-modal="true" aria-labelledby="adminTitle">
-    <button class="modal-close" id="adminCloseBtn" aria-label="Закрыть">
-      <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-    </button>
-
-    <h3 class="admin-title" id="adminTitle">Режим «Заданный победитель»</h3>
-    <p class="admin-sub">Служебная панель для тестирования. Не отображается зрителям.</p>
-
-    <label class="admin-toggle-row">
-      <span>Включить принудительный выбор</span>
-      <span class="switch">
-        <input type="checkbox" id="forceWinnerToggle">
-        <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
-      </span>
-    </label>
-
-    <label class="field-label" for="forceWinnerInput">Никнейм победителя</label>
-    <input id="forceWinnerInput" class="text-input" type="text" placeholder="Введите ник из списка участников" disabled>
-    <p class="field-note">
-      Если такого ника нет среди загруженных участников, он будет автоматически добавлен в список перед прокруткой.
-    </p>
-
-    <button class="btn-primary admin-save-btn" id="adminSaveBtn">Сохранить</button>
-  </div>
-</div>
-
-<!-- ============================================================
      ПОДВАЛ (FOOTER)
      ============================================================ -->
 <footer class="site-footer">
+  <p class="footer-tagline">Нейросправедливый розыгрыш для тех, кто дорожит доверием своего чата.</p>
   <p>
     © <span id="footerYear"></span> NeuroDraw. Сделано для стримеров — бесплатно и без ограничений.
   </p>
   <p class="footer-credit">
     by <a href="https://t.me/WZ_Casper" target="_blank" rel="noopener noreferrer">亗 Casper</a>
+    · <a href="admin.html" target="_blank" rel="noopener noreferrer" class="footer-admin-link">Панель ведущего</a>
   </p>
 </footer>
 

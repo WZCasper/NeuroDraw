@@ -7,7 +7,7 @@
      4. Фильтрация и загрузка участников
      5. Барабан рулетки (анимация прокрутки)
      6. Модальное окно победителя
-     7. Скрытый админ-режим "Заданный победитель" (Shift + F8)
+     7. Синхронизация режима "Заданный победитель" с панелью ведущего
      8. Мобильное меню, тосты, инициализация
    ==================================================================== */
 
@@ -431,63 +431,50 @@
   }
 
   /* ------------------------------------------------------------------
-     7. СКРЫТЫЙ АДМИН-РЕЖИМ "ЗАДАННЫЙ ПОБЕДИТЕЛЬ"
+     7. СИНХРОНИЗАЦИЯ РЕЖИМА "ЗАДАННЫЙ ПОБЕДИТЕЛЬ" С ПАНЕЛЬЮ ВЕДУЩЕГО
+     ------------------------------------------------------------------
+     Панель ведущего живёт в отдельном файле admin.html — отдельный
+     документ, который не рендерится внутри index.html. Поэтому пока
+     в OBS Browser Source указан только index.html, никакие действия
+     на странице admin.html не могут попасть в кадр трансляции.
+
+     Обмен данными между двумя открытыми документами одного сайта
+     происходит через localStorage: запись на странице admin.html
+     мгновенно доступна на этой странице через событие "storage".
      ------------------------------------------------------------------ */
 
-  function openAdminModal() {
-    $('forceWinnerToggle').checked = state.forceWinner.enabled;
-    $('forceWinnerInput').value = state.forceWinner.nickname;
-    $('forceWinnerInput').disabled = !state.forceWinner.enabled;
-    $('adminModal').hidden = false;
+  const FORCE_WINNER_STORAGE_KEY = 'neurodraw_force_winner';
+
+  function readForceWinnerFromStorage() {
+    try {
+      const raw = localStorage.getItem(FORCE_WINNER_STORAGE_KEY);
+      if (!raw) return { enabled: false, nickname: '' };
+      const parsed = JSON.parse(raw);
+      return {
+        enabled: Boolean(parsed.enabled),
+        nickname: typeof parsed.nickname === 'string' ? parsed.nickname : ''
+      };
+    } catch (err) {
+      return { enabled: false, nickname: '' };
+    }
   }
 
-  function closeAdminModal() {
-    $('adminModal').hidden = true;
+  function applyForceWinnerState(nextState) {
+    state.forceWinner.enabled = nextState.enabled;
+    state.forceWinner.nickname = nextState.nickname;
+    $('forceWinnerIndicator').hidden = !nextState.enabled;
   }
 
-  function initAdminModeTrigger() {
-    // Способ 1: комбинация клавиш Shift + F8
-    document.addEventListener('keydown', (e) => {
-      if (e.shiftKey && e.key === 'F8') {
-        e.preventDefault();
-        openAdminModal();
-      }
-      if (e.key === 'Escape') {
-        if (!$('adminModal').hidden) closeAdminModal();
-        if (!$('victoryModal').hidden) hideVictoryModal();
-      }
-    });
+  function initForceWinnerSync() {
+    // Применяем состояние, уже сохранённое ранее (если панель ведущего настраивалась раньше)
+    applyForceWinnerState(readForceWinnerFromStorage());
 
-    // Способ 2: клик по невидимому пикселю в углу табло рулетки
-    $('hiddenAdminPixel').addEventListener('click', openAdminModal);
-
-    $('adminCloseBtn').addEventListener('click', closeAdminModal);
-
-    $('adminModal').addEventListener('click', (e) => {
-      if (e.target === e.currentTarget) closeAdminModal();
-    });
-
-    $('forceWinnerToggle').addEventListener('change', (e) => {
-      $('forceWinnerInput').disabled = !e.target.checked;
-      if (e.target.checked) $('forceWinnerInput').focus();
-    });
-
-    $('adminSaveBtn').addEventListener('click', () => {
-      const enabled = $('forceWinnerToggle').checked;
-      const nickname = $('forceWinnerInput').value.trim();
-
-      if (enabled && !nickname) {
-        showToast('Введите никнейм или выключите режим', true);
-        return;
-      }
-
-      state.forceWinner.enabled = enabled;
-      state.forceWinner.nickname = nickname;
-
-      $('forceWinnerIndicator').hidden = !enabled;
-
-      closeAdminModal();
-      showToast(enabled ? `Заданный победитель: ${nickname}` : 'Режим заданного победителя выключен');
+    // Событие "storage" срабатывает в этой вкладке, когда localStorage меняют
+    // в ДРУГОЙ вкладке/окне того же сайта — то есть когда ведущий сохраняет
+    // настройки на странице admin.html.
+    window.addEventListener('storage', (e) => {
+      if (e.key !== FORCE_WINNER_STORAGE_KEY) return;
+      applyForceWinnerState(readForceWinnerFromStorage());
     });
   }
 
@@ -515,6 +502,10 @@
     $('victoryModal').addEventListener('click', (e) => {
       if (e.target === e.currentTarget) hideVictoryModal();
     });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !$('victoryModal').hidden) hideVictoryModal();
+    });
   }
 
   function init() {
@@ -529,7 +520,7 @@
     $('spinBtn').addEventListener('click', spin);
 
     initVictoryModalControls();
-    initAdminModeTrigger();
+    initForceWinnerSync();
     initMobileMenu();
 
     renderReelPlaceholder('Загрузите участников, чтобы начать');

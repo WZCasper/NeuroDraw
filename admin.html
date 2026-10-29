@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>NeuroDraw — панель ведущего (не для трансляции)</title>
+<meta name="robots" content="noindex, nofollow">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+
+<link rel="stylesheet" href="style.css">
+<link rel="icon" type="image/png" href="favicon.png">
+</head>
+<body class="admin-page-body">
+
+<div class="admin-page-wrap">
+  <div class="admin-page-card">
+
+    <div class="admin-page-warning">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M12 3.5 2.5 20h19L12 3.5z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M12 10v5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="12" cy="17.5" r="0.9" fill="currentColor"/></svg>
+      <span>Эта страница — служебная. Не добавляйте её как источник (Browser Source) в OBS: добавляйте только <code>index.html</code>. Тогда панель ведущего останется невидимой для зрителей, в каком бы окне вы её ни открыли.</span>
+    </div>
+
+    <h1 class="admin-title">Режим «Заданный победитель»</h1>
+    <p class="admin-sub">
+      Настройки сохраняются в этом браузере и применяются к открытой странице розыгрыша (<code>index.html</code>)
+      на этом же компьютере — даже если она открыта в другом окне или вкладке.
+    </p>
+
+    <label class="admin-toggle-row">
+      <span>Включить принудительный выбор</span>
+      <span class="switch">
+        <input type="checkbox" id="forceWinnerToggle">
+        <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+      </span>
+    </label>
+
+    <label class="field-label" for="forceWinnerInput">Никнейм победителя</label>
+    <input id="forceWinnerInput" class="text-input" type="text" placeholder="Введите ник из списка участников" disabled>
+    <p class="field-note">
+      Если такого ника нет среди загруженных участников на странице розыгрыша, он будет автоматически добавлен
+      в список перед прокруткой.
+    </p>
+
+    <button class="btn-primary admin-save-btn" id="adminSaveBtn">Сохранить и применить</button>
+
+    <div class="admin-page-status" id="adminStatus" role="status" aria-live="polite"></div>
+
+    <a class="admin-page-back" href="index.html">← Открыть страницу розыгрыша</a>
+  </div>
+</div>
+
+<script src="admin.js"></script>
+</body>
+</html>
