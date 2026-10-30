@@ -157,12 +157,12 @@ stream_queen
 
       <!-- Режим: ссылка на видео/стрим -->
       <div class="input-mode-panel is-hidden" id="modeLink">
-        <label class="field-label" for="sourceUrlInput">Ссылка на видео, пост или стрим</label>
+        <label class="field-label" for="sourceUrlInput" id="sourceUrlLabel">Ссылка на видео, пост или стрим</label>
         <input id="sourceUrlInput" class="text-input" type="url" placeholder="https://...">
-        <p class="field-note">
+        <p class="field-note" id="sourceUrlNote">
           Для YouTube автосбор работает по-настоящему: подставляются реальные авторы комментариев под указанным видео.
-          Для Twitch, TikTok и Instagram автосбор по ссылке пока не реализован — вставьте участников вручную
-          во вкладке «Список ников», розыгрыш отработает полностью корректно.
+          Для Twitch доступен сбор из чата прямо во время эфира. Для TikTok и Instagram автосбор пока не реализован —
+          вставьте участников вручную во вкладке «Список ников», розыгрыш отработает полностью корректно.
         </p>
       </div>
     </div>

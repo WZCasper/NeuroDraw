@@ -98,10 +98,44 @@
         tab.classList.add('is-active');
         tab.setAttribute('aria-selected', 'true');
 
+        // Переключение платформы на середине сбора чата Twitch — отменяем сбор без применения
+        if (twitchSocket) cancelTwitchCollection();
+
         state.platform = tab.dataset.platform;
         updatePlatformIndicator();
+        updateLinkModeHint();
       });
     });
+  }
+
+  /** Обновляет подпись, плейсхолдер и текст-подсказку под полем «По ссылке» под текущую платформу. */
+  function updateLinkModeHint() {
+    const label = $('sourceUrlLabel');
+    const input = $('sourceUrlInput');
+    const note = $('sourceUrlNote');
+    const btnLabel = $('loadParticipantsBtn').querySelector('.btn-load-label');
+
+    if (state.platform === 'youtube') {
+      label.textContent = 'Ссылка на видео, пост или стрим';
+      input.type = 'url';
+      input.placeholder = 'https://www.youtube.com/watch?v=...';
+      note.textContent = 'Автосбор реально работает: подставляются настоящие авторы комментариев под указанным видео.';
+      btnLabel.textContent = 'Загрузить участников';
+    } else if (state.platform === 'twitch') {
+      label.textContent = 'Имя канала Twitch или ссылка на стрим';
+      input.type = 'text';
+      input.placeholder = 'twitch.tv/канал или просто имя канала';
+      note.textContent = 'Канал должен быть в эфире. Нажмите «Начать сбор из чата» — сайт анонимно подключится к чату '
+        + 'и будет собирать ники написавших, пока вы не нажмёте «Остановить и применить».';
+      btnLabel.textContent = 'Начать сбор из чата';
+    } else {
+      label.textContent = 'Ссылка на видео, пост или стрим';
+      input.type = 'url';
+      input.placeholder = 'https://...';
+      note.textContent = 'Для этой платформы автосбор по ссылке пока не реализован — вставьте участников вручную '
+        + 'во вкладке «Список ников», розыгрыш отработает полностью корректно.';
+      btnLabel.textContent = 'Загрузить участников';
+    }
   }
 
   function updatePlatformIndicator() {
@@ -123,6 +157,8 @@
         });
         tab.classList.add('is-active');
         tab.setAttribute('aria-selected', 'true');
+
+        if (twitchSocket) cancelTwitchCollection();
 
         state.inputMode = tab.dataset.mode;
         $('modeList').classList.toggle('is-hidden', state.inputMode !== 'list');
@@ -234,6 +270,173 @@
       });
   }
 
+  /* ------------------------------------------------------------------
+     3b. TWITCH — сбор ников прямо из чата во время эфира.
+     Подключение анонимное (без OAuth, по протоколу, который сам Twitch
+     предоставляет для read-only доступа к публичному чату — логин вида
+     justinfanXXXXX), работает только пока канал в эфире и в чате кто-то
+     пишет. Никаких списков заранее — только реально написавшие.
+     ------------------------------------------------------------------ */
+
+  const TWITCH_WS_URL = 'wss://irc-ws.chat.twitch.tv:443';
+  const TWITCH_MAX_COLLECT_MS = 15 * 60 * 1000; // автостоп через 15 минут на случай, если забыли остановить
+
+  let twitchSocket = null;
+  let twitchCollected = null; // Map<логин в нижнем регистре, отображаемое имя>
+  let twitchAutoStopTimer = null;
+
+  /** Достаёт имя Twitch-канала из поля — принимает и просто ник, и ссылку twitch.tv/ник. */
+  function extractTwitchChannel(raw) {
+    const value = raw.trim();
+    if (!value) return null;
+
+    if (/^[a-zA-Z0-9_]{3,25}$/.test(value)) {
+      return value.toLowerCase();
+    }
+
+    try {
+      const url = new URL(value.includes('://') ? value : `https://${value}`);
+      const host = url.hostname.replace(/^www\./, '');
+      if (host === 'twitch.tv' || host === 'm.twitch.tv') {
+        const parts = url.pathname.split('/').filter(Boolean);
+        if (parts.length) return parts[0].toLowerCase();
+      }
+    } catch {
+      // не распознано как ссылка
+    }
+
+    return null;
+  }
+
+  /** Жёстко разрывает соединение с чатом, не завершая сбор (внутренняя часть). */
+  function stopTwitchCollection() {
+    if (twitchAutoStopTimer) {
+      clearTimeout(twitchAutoStopTimer);
+      twitchAutoStopTimer = null;
+    }
+    if (twitchSocket) {
+      const socket = twitchSocket;
+      twitchSocket = null;
+      socket.onclose = null;
+      socket.onerror = null;
+      socket.onmessage = null;
+      socket.close();
+    }
+  }
+
+  /** Останавливает сбор и применяет то, что успели собрать (или честно сообщает, что ничего не нашли). */
+  function finishTwitchCollection(options) {
+    const btn = $('loadParticipantsBtn');
+    const names = twitchCollected ? Array.from(twitchCollected.values()) : [];
+
+    stopTwitchCollection();
+    twitchCollected = null;
+
+    btn.classList.remove('is-loading');
+    btn.disabled = false;
+    btn.querySelector('.btn-load-label').textContent = 'Начать сбор из чата';
+
+    if (names.length === 0) {
+      const counter = $('participantsCounter');
+      counter.textContent = 'Участников не загружено';
+      counter.classList.remove('has-count');
+      showToast('За время сбора в чате не появилось ни одного сообщения', true);
+      return;
+    }
+
+    finishLoadingParticipants(names.join('\n'), options);
+  }
+
+  /** Отменяет сбор без применения результата — например, при уходе на другую платформу/вкладку. */
+  function cancelTwitchCollection() {
+    stopTwitchCollection();
+    twitchCollected = null;
+    const btn = $('loadParticipantsBtn');
+    btn.classList.remove('is-loading');
+    btn.disabled = false;
+    btn.querySelector('.btn-load-label').textContent = 'Начать сбор из чата';
+    const counter = $('participantsCounter');
+    counter.textContent = 'Участников не загружено';
+    counter.classList.remove('has-count');
+  }
+
+  function startTwitchCollection(channel, options) {
+    const btn = $('loadParticipantsBtn');
+    const counter = $('participantsCounter');
+
+    twitchCollected = new Map();
+
+    const socket = new WebSocket(TWITCH_WS_URL);
+    twitchSocket = socket;
+
+    socket.onopen = () => {
+      const anonNick = `justinfan${Math.floor(10000 + Math.random() * 80000)}`;
+      socket.send('PASS SCHMOOPIIE');
+      socket.send(`NICK ${anonNick}`);
+      socket.send('CAP REQ :twitch.tv/tags');
+      socket.send(`JOIN #${channel}`);
+    };
+
+    socket.onmessage = (event) => {
+      if (twitchSocket !== socket) return; // сбор уже остановлен — игнорируем хвост сообщений
+
+      const lines = String(event.data).split('\r\n').filter(Boolean);
+      for (const line of lines) {
+        if (line.startsWith('PING')) {
+          socket.send('PONG :tmi.twitch.tv');
+          continue;
+        }
+        if (!line.includes('PRIVMSG')) continue;
+
+        let tagsPart = '';
+        let rest = line;
+        if (line.startsWith('@')) {
+          const spaceIdx = line.indexOf(' ');
+          tagsPart = line.slice(1, spaceIdx);
+          rest = line.slice(spaceIdx + 1);
+        }
+
+        const prefixMatch = rest.match(/^:([^!]+)!/);
+        if (!prefixMatch) continue;
+        const loginName = prefixMatch[1].toLowerCase();
+
+        let displayName = loginName;
+        if (tagsPart) {
+          const dnMatch = tagsPart.match(/display-name=([^;]*)/);
+          if (dnMatch && dnMatch[1]) displayName = dnMatch[1];
+        }
+
+        if (!twitchCollected.has(loginName)) {
+          twitchCollected.set(loginName, displayName);
+          counter.textContent = `Собираю из чата: ${twitchCollected.size} чел. — нажмите «Остановить и применить», когда будете готовы`;
+          counter.classList.add('has-count');
+        }
+      }
+    };
+
+    socket.onerror = () => {
+      if (twitchSocket !== socket) return;
+      showToast('Не удалось подключиться к чату Twitch. Проверьте имя канала и подключение к интернету.', true);
+      finishTwitchCollection(options);
+    };
+
+    socket.onclose = () => {
+      if (twitchSocket !== socket) return; // закрыто нашей же командой — уже обработано
+      finishTwitchCollection(options);
+    };
+
+    btn.classList.add('is-loading');
+    btn.disabled = false;
+    btn.querySelector('.btn-load-label').textContent = 'Остановить и применить';
+    counter.textContent = 'Подключаюсь к чату…';
+    counter.classList.add('has-count');
+
+    twitchAutoStopTimer = setTimeout(() => {
+      showToast('Сбор остановлен автоматически по таймеру (15 минут), список применён', false);
+      finishTwitchCollection(options);
+    }, TWITCH_MAX_COLLECT_MS);
+  }
+
   function handleLoadParticipants() {
     const excludeDuplicates = $('filterDuplicates').checked;
     const keywordEnabled = $('filterKeywordEnabled').checked;
@@ -242,6 +445,21 @@
 
     // Валидация в зависимости от выбранного режима ввода
     if (state.inputMode === 'link') {
+      if (state.platform === 'twitch') {
+        if (twitchSocket) {
+          // Сбор уже идёт — повторное нажатие останавливает его и применяет результат
+          finishTwitchCollection(options);
+          return;
+        }
+        const channel = extractTwitchChannel($('sourceUrlInput').value);
+        if (!channel) {
+          showToast('Введите имя канала Twitch или ссылку вида twitch.tv/канал', true);
+          return;
+        }
+        startTwitchCollection(channel, options);
+        return;
+      }
+
       const url = $('sourceUrlInput').value.trim();
       if (!url) {
         showToast('Вставьте ссылку или переключитесь на ручной ввод списка', true);
@@ -249,7 +467,7 @@
       }
 
       if (state.platform !== 'youtube') {
-        showToast('Автосбор по ссылке пока реализован только для YouTube. Для этой платформы используйте вкладку «Список ников».', true);
+        showToast('Автосбор по ссылке реализован для YouTube и Twitch (чат в эфире). Для этой платформы используйте вкладку «Список ников».', true);
         return;
       }
 
@@ -559,6 +777,7 @@
 
     initPlatformTabs();
     updatePlatformIndicator();
+    updateLinkModeHint();
     initInputModeSwitch();
     initKeywordFilterToggle();
 
