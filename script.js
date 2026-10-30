@@ -7,7 +7,7 @@
      4. Фильтрация и загрузка участников
      5. Барабан рулетки (анимация прокрутки)
      6. Модальное окно победителя
-     7. Синхронизация режима "Заданный победитель" с панелью ведущего
+     7. Скрытый админ-режим "Заданный победитель" (Shift + F8)
      8. Мобильное меню, тосты, инициализация
    ==================================================================== */
 
@@ -28,11 +28,6 @@
       nickname: ''                 // заданный ник
     }
   };
-
-  // Адрес Cloudflare Worker'а, который реально собирает комментаторов
-  // под видео YouTube через официальный YouTube Data API v3.
-  // Если воркер развёрнут на другом поддомене workers.dev — поменяйте только эту строку.
-  const YOUTUBE_WORKER_URL = 'https://neurodraw-api.webtkachdenis.workers.dev';
 
   const PLATFORM_LABELS = {
     youtube: 'YouTube',
@@ -98,44 +93,10 @@
         tab.classList.add('is-active');
         tab.setAttribute('aria-selected', 'true');
 
-        // Переключение платформы на середине сбора чата Twitch — отменяем сбор без применения
-        if (twitchSocket) cancelTwitchCollection();
-
         state.platform = tab.dataset.platform;
         updatePlatformIndicator();
-        updateLinkModeHint();
       });
     });
-  }
-
-  /** Обновляет подпись, плейсхолдер и текст-подсказку под полем «По ссылке» под текущую платформу. */
-  function updateLinkModeHint() {
-    const label = $('sourceUrlLabel');
-    const input = $('sourceUrlInput');
-    const note = $('sourceUrlNote');
-    const btnLabel = $('loadParticipantsBtn').querySelector('.btn-load-label');
-
-    if (state.platform === 'youtube') {
-      label.textContent = 'Ссылка на видео, пост или стрим';
-      input.type = 'url';
-      input.placeholder = 'https://www.youtube.com/watch?v=...';
-      note.textContent = 'Автосбор реально работает: подставляются настоящие авторы комментариев под указанным видео.';
-      btnLabel.textContent = 'Загрузить участников';
-    } else if (state.platform === 'twitch') {
-      label.textContent = 'Имя канала Twitch или ссылка на стрим';
-      input.type = 'text';
-      input.placeholder = 'twitch.tv/канал или просто имя канала';
-      note.textContent = 'Канал должен быть в эфире. Нажмите «Начать сбор из чата» — сайт анонимно подключится к чату '
-        + 'и будет собирать ники написавших, пока вы не нажмёте «Остановить и применить».';
-      btnLabel.textContent = 'Начать сбор из чата';
-    } else {
-      label.textContent = 'Ссылка на видео, пост или стрим';
-      input.type = 'url';
-      input.placeholder = 'https://...';
-      note.textContent = 'Для этой платформы автосбор по ссылке пока не реализован — вставьте участников вручную '
-        + 'во вкладке «Список ников», розыгрыш отработает полностью корректно.';
-      btnLabel.textContent = 'Загрузить участников';
-    }
   }
 
   function updatePlatformIndicator() {
@@ -157,8 +118,6 @@
         });
         tab.classList.add('is-active');
         tab.setAttribute('aria-selected', 'true');
-
-        if (twitchSocket) cancelTwitchCollection();
 
         state.inputMode = tab.dataset.mode;
         $('modeList').classList.toggle('is-hidden', state.inputMode !== 'list');
@@ -216,280 +175,57 @@
     return lines;
   }
 
-  /** Общее завершение загрузки: применяет фильтры и обновляет интерфейс. */
-  function finishLoadingParticipants(rawText, options) {
-    const btn = $('loadParticipantsBtn');
-    const counter = $('participantsCounter');
-    const result = parseParticipants(rawText, options);
-
-    state.participants = result;
-
-    btn.classList.remove('is-loading');
-    btn.disabled = false;
-
-    if (result.length === 0) {
-      counter.textContent = 'Участников не найдено — проверьте фильтры';
-      counter.classList.remove('has-count');
-      $('spinBtn').disabled = true;
-      renderReelPlaceholder('Участники не найдены');
-      return;
-    }
-
-    counter.textContent = `Загружено участников: ${result.length}`;
-    counter.classList.add('has-count');
-    $('spinBtn').disabled = false;
-    renderReelIdle();
-    showToast(`Готово! Найдено участников: ${result.length}`);
-  }
-
-  /** Реальный сбор комментаторов под YouTube-видео через Cloudflare Worker. */
-  function loadParticipantsFromYoutubeLink(url, options) {
-    const btn = $('loadParticipantsBtn');
-    const counter = $('participantsCounter');
-
-    btn.classList.add('is-loading');
-    btn.disabled = true;
-
-    const endpoint = `${YOUTUBE_WORKER_URL}?url=${encodeURIComponent(url)}`;
-
-    fetch(endpoint)
-      .then((res) => res.json())
-      .then((data) => {
-        if (!data.success) {
-          btn.classList.remove('is-loading');
-          btn.disabled = false;
-          showToast(data.error || 'Не удалось собрать участников по ссылке', true);
-          return;
-        }
-        finishLoadingParticipants(data.participants.join('\n'), options);
-      })
-      .catch(() => {
-        btn.classList.remove('is-loading');
-        btn.disabled = false;
-        showToast('Не удалось связаться с сервером сбора участников. Проверьте соединение и попробуйте ещё раз.', true);
-      });
-  }
-
-  /* ------------------------------------------------------------------
-     3b. TWITCH — сбор ников прямо из чата во время эфира.
-     Подключение анонимное (без OAuth, по протоколу, который сам Twitch
-     предоставляет для read-only доступа к публичному чату — логин вида
-     justinfanXXXXX), работает только пока канал в эфире и в чате кто-то
-     пишет. Никаких списков заранее — только реально написавшие.
-     ------------------------------------------------------------------ */
-
-  const TWITCH_WS_URL = 'wss://irc-ws.chat.twitch.tv:443';
-  const TWITCH_MAX_COLLECT_MS = 15 * 60 * 1000; // автостоп через 15 минут на случай, если забыли остановить
-
-  let twitchSocket = null;
-  let twitchCollected = null; // Map<логин в нижнем регистре, отображаемое имя>
-  let twitchAutoStopTimer = null;
-
-  /** Достаёт имя Twitch-канала из поля — принимает и просто ник, и ссылку twitch.tv/ник. */
-  function extractTwitchChannel(raw) {
-    const value = raw.trim();
-    if (!value) return null;
-
-    if (/^[a-zA-Z0-9_]{3,25}$/.test(value)) {
-      return value.toLowerCase();
-    }
-
-    try {
-      const url = new URL(value.includes('://') ? value : `https://${value}`);
-      const host = url.hostname.replace(/^www\./, '');
-      if (host === 'twitch.tv' || host === 'm.twitch.tv') {
-        const parts = url.pathname.split('/').filter(Boolean);
-        if (parts.length) return parts[0].toLowerCase();
-      }
-    } catch {
-      // не распознано как ссылка
-    }
-
-    return null;
-  }
-
-  /** Жёстко разрывает соединение с чатом, не завершая сбор (внутренняя часть). */
-  function stopTwitchCollection() {
-    if (twitchAutoStopTimer) {
-      clearTimeout(twitchAutoStopTimer);
-      twitchAutoStopTimer = null;
-    }
-    if (twitchSocket) {
-      const socket = twitchSocket;
-      twitchSocket = null;
-      socket.onclose = null;
-      socket.onerror = null;
-      socket.onmessage = null;
-      socket.close();
-    }
-  }
-
-  /** Останавливает сбор и применяет то, что успели собрать (или честно сообщает, что ничего не нашли). */
-  function finishTwitchCollection(options) {
-    const btn = $('loadParticipantsBtn');
-    const names = twitchCollected ? Array.from(twitchCollected.values()) : [];
-
-    stopTwitchCollection();
-    twitchCollected = null;
-
-    btn.classList.remove('is-loading');
-    btn.disabled = false;
-    btn.querySelector('.btn-load-label').textContent = 'Начать сбор из чата';
-
-    if (names.length === 0) {
-      const counter = $('participantsCounter');
-      counter.textContent = 'Участников не загружено';
-      counter.classList.remove('has-count');
-      showToast('За время сбора в чате не появилось ни одного сообщения', true);
-      return;
-    }
-
-    finishLoadingParticipants(names.join('\n'), options);
-  }
-
-  /** Отменяет сбор без применения результата — например, при уходе на другую платформу/вкладку. */
-  function cancelTwitchCollection() {
-    stopTwitchCollection();
-    twitchCollected = null;
-    const btn = $('loadParticipantsBtn');
-    btn.classList.remove('is-loading');
-    btn.disabled = false;
-    btn.querySelector('.btn-load-label').textContent = 'Начать сбор из чата';
-    const counter = $('participantsCounter');
-    counter.textContent = 'Участников не загружено';
-    counter.classList.remove('has-count');
-  }
-
-  function startTwitchCollection(channel, options) {
-    const btn = $('loadParticipantsBtn');
-    const counter = $('participantsCounter');
-
-    twitchCollected = new Map();
-
-    const socket = new WebSocket(TWITCH_WS_URL);
-    twitchSocket = socket;
-
-    socket.onopen = () => {
-      const anonNick = `justinfan${Math.floor(10000 + Math.random() * 80000)}`;
-      socket.send('PASS SCHMOOPIIE');
-      socket.send(`NICK ${anonNick}`);
-      socket.send('CAP REQ :twitch.tv/tags');
-      socket.send(`JOIN #${channel}`);
-    };
-
-    socket.onmessage = (event) => {
-      if (twitchSocket !== socket) return; // сбор уже остановлен — игнорируем хвост сообщений
-
-      const lines = String(event.data).split('\r\n').filter(Boolean);
-      for (const line of lines) {
-        if (line.startsWith('PING')) {
-          socket.send('PONG :tmi.twitch.tv');
-          continue;
-        }
-        if (!line.includes('PRIVMSG')) continue;
-
-        let tagsPart = '';
-        let rest = line;
-        if (line.startsWith('@')) {
-          const spaceIdx = line.indexOf(' ');
-          tagsPart = line.slice(1, spaceIdx);
-          rest = line.slice(spaceIdx + 1);
-        }
-
-        const prefixMatch = rest.match(/^:([^!]+)!/);
-        if (!prefixMatch) continue;
-        const loginName = prefixMatch[1].toLowerCase();
-
-        let displayName = loginName;
-        if (tagsPart) {
-          const dnMatch = tagsPart.match(/display-name=([^;]*)/);
-          if (dnMatch && dnMatch[1]) displayName = dnMatch[1];
-        }
-
-        if (!twitchCollected.has(loginName)) {
-          twitchCollected.set(loginName, displayName);
-          counter.textContent = `Собираю из чата: ${twitchCollected.size} чел. — нажмите «Остановить и применить», когда будете готовы`;
-          counter.classList.add('has-count');
-        }
-      }
-    };
-
-    socket.onerror = () => {
-      if (twitchSocket !== socket) return;
-      showToast('Не удалось подключиться к чату Twitch. Проверьте имя канала и подключение к интернету.', true);
-      finishTwitchCollection(options);
-    };
-
-    socket.onclose = () => {
-      if (twitchSocket !== socket) return; // закрыто нашей же командой — уже обработано
-      finishTwitchCollection(options);
-    };
-
-    btn.classList.add('is-loading');
-    btn.disabled = false;
-    btn.querySelector('.btn-load-label').textContent = 'Остановить и применить';
-    counter.textContent = 'Подключаюсь к чату…';
-    counter.classList.add('has-count');
-
-    twitchAutoStopTimer = setTimeout(() => {
-      showToast('Сбор остановлен автоматически по таймеру (15 минут), список применён', false);
-      finishTwitchCollection(options);
-    }, TWITCH_MAX_COLLECT_MS);
-  }
-
   function handleLoadParticipants() {
-    const excludeDuplicates = $('filterDuplicates').checked;
-    const keywordEnabled = $('filterKeywordEnabled').checked;
-    const keyword = $('filterKeywordInput').value;
-    const options = { excludeDuplicates, keywordEnabled, keyword };
+    const btn = $('loadParticipantsBtn');
+    const counter = $('participantsCounter');
 
     // Валидация в зависимости от выбранного режима ввода
     if (state.inputMode === 'link') {
-      if (state.platform === 'twitch') {
-        if (twitchSocket) {
-          // Сбор уже идёт — повторное нажатие останавливает его и применяет результат
-          finishTwitchCollection(options);
-          return;
-        }
-        const channel = extractTwitchChannel($('sourceUrlInput').value);
-        if (!channel) {
-          showToast('Введите имя канала Twitch или ссылку вида twitch.tv/канал', true);
-          return;
-        }
-        startTwitchCollection(channel, options);
-        return;
-      }
-
       const url = $('sourceUrlInput').value.trim();
       if (!url) {
         showToast('Вставьте ссылку или переключитесь на ручной ввод списка', true);
         return;
       }
-
-      if (state.platform !== 'youtube') {
-        showToast('Автосбор по ссылке реализован для YouTube и Twitch (чат в эфире). Для этой платформы используйте вкладку «Список ников».', true);
-        return;
-      }
-
-      loadParticipantsFromYoutubeLink(url, options);
+      showToast('Автосбор по ссылке требует подключения API платформы. Используйте вкладку «Список ников».', true);
       return;
     }
 
     const rawText = $('participantsInput').value;
+    const excludeDuplicates = $('filterDuplicates').checked;
+    const keywordEnabled = $('filterKeywordEnabled').checked;
+    const keyword = $('filterKeywordInput').value;
 
     if (!rawText.trim()) {
       showToast('Добавьте хотя бы одного участника', true);
       return;
     }
 
-    const btn = $('loadParticipantsBtn');
+    // Небольшая имитация процесса загрузки для наглядности UI — чисто визуальный индикатор,
+    // сам список участников формируется мгновенно и полностью реально (без фейковых данных).
     btn.classList.add('is-loading');
     btn.disabled = true;
 
-    // Небольшая пауза для наглядности UI — сам список участников формируется
-    // мгновенно и полностью реально (без фейковых данных).
     setTimeout(() => {
-      finishLoadingParticipants(rawText, options);
+      const result = parseParticipants(rawText, { excludeDuplicates, keywordEnabled, keyword });
+
+      state.participants = result;
+
+      btn.classList.remove('is-loading');
+      btn.disabled = false;
+
+      if (result.length === 0) {
+        counter.textContent = 'Участников не найдено — проверьте фильтры';
+        counter.classList.remove('has-count');
+        $('spinBtn').disabled = true;
+        renderReelPlaceholder('Участники не найдены');
+        return;
+      }
+
+      counter.textContent = `Загружено участников: ${result.length}`;
+      counter.classList.add('has-count');
+      $('spinBtn').disabled = false;
+      renderReelIdle();
+      showToast(`Готово! Найдено участников: ${result.length}`);
     }, 450);
   }
 
@@ -695,50 +431,90 @@
   }
 
   /* ------------------------------------------------------------------
-     7. СИНХРОНИЗАЦИЯ РЕЖИМА "ЗАДАННЫЙ ПОБЕДИТЕЛЬ" С ПАНЕЛЬЮ ВЕДУЩЕГО
-     ------------------------------------------------------------------
-     Панель ведущего живёт в отдельном файле admin.html — отдельный
-     документ, который не рендерится внутри index.html. Поэтому пока
-     в OBS Browser Source указан только index.html, никакие действия
-     на странице admin.html не могут попасть в кадр трансляции.
+     7. СКРЫТЫЙ АДМИН-РЕЖИМ "ЗАДАННЫЙ ПОБЕДИТЕЛЬ"
 
-     Обмен данными между двумя открытыми документами одного сайта
-     происходит через localStorage: запись на странице admin.html
-     мгновенно доступна на этой странице через событие "storage".
+     Важное техническое пояснение (честно, без имитации):
+     Веб-страница не может скрыть элемент от произвольного "захвата
+     экрана" — у браузера просто нет информации о том, что в данный
+     момент кто-то считывает его пиксели извне. Единственный случай,
+     когда страница ДЕЙСТВИТЕЛЬНО может отличить "обычного зрителя
+     вкладки" от OBS — это когда OBS подключается через источник
+     "Browser Source" (OBS рендерит страницу сам, отдельным, скрытым
+     от человека процессом, и этот процесс сообщает о себе через
+     navigator.userAgent, содержащий подстроку "OBS").
+     Если вместо этого в OBS используется "Захват окна" (Window
+     Capture) поверх обычного окна браузера — OBS копирует ровно те
+     же пиксели, что видит админ, и никакой код веб-страницы не
+     может показать админу одно, а зрителям — другое: это один и
+     тот же кадр. Поэтому для скрытности от стрима нужно добавлять
+     NeuroDraw в OBS именно как Browser Source, а не как Window
+     Capture — тогда проверка ниже отработает корректно.
      ------------------------------------------------------------------ */
 
-  const FORCE_WINNER_STORAGE_KEY = 'neurodraw_force_winner';
+  /** true, если текущая страница выполняется внутри источника OBS Browser Source. */
+  function isRunningInsideOBS() {
+    return /\bOBS\b/i.test(navigator.userAgent);
+  }
 
-  function readForceWinnerFromStorage() {
-    try {
-      const raw = localStorage.getItem(FORCE_WINNER_STORAGE_KEY);
-      if (!raw) return { enabled: false, nickname: '' };
-      const parsed = JSON.parse(raw);
-      return {
-        enabled: Boolean(parsed.enabled),
-        nickname: typeof parsed.nickname === 'string' ? parsed.nickname : ''
-      };
-    } catch (err) {
-      return { enabled: false, nickname: '' };
+  function openAdminModal() {
+    if (isRunningInsideOBS()) {
+      // Внутри OBS Browser Source это окно не должно появляться вообще —
+      // даже если кто-то случайно нажмёт комбинацию клавиш на сцене.
+      return;
     }
+    $('forceWinnerToggle').checked = state.forceWinner.enabled;
+    $('forceWinnerInput').value = state.forceWinner.nickname;
+    $('forceWinnerInput').disabled = !state.forceWinner.enabled;
+    $('adminModal').hidden = false;
   }
 
-  function applyForceWinnerState(nextState) {
-    state.forceWinner.enabled = nextState.enabled;
-    state.forceWinner.nickname = nextState.nickname;
-    $('forceWinnerIndicator').hidden = !nextState.enabled;
+  function closeAdminModal() {
+    $('adminModal').hidden = true;
   }
 
-  function initForceWinnerSync() {
-    // Применяем состояние, уже сохранённое ранее (если панель ведущего настраивалась раньше)
-    applyForceWinnerState(readForceWinnerFromStorage());
+  function initAdminModeTrigger() {
+    // Способ 1: комбинация клавиш Shift + F8
+    document.addEventListener('keydown', (e) => {
+      if (e.shiftKey && e.key === 'F8') {
+        e.preventDefault();
+        openAdminModal();
+      }
+      if (e.key === 'Escape') {
+        if (!$('adminModal').hidden) closeAdminModal();
+        if (!$('victoryModal').hidden) hideVictoryModal();
+      }
+    });
 
-    // Событие "storage" срабатывает в этой вкладке, когда localStorage меняют
-    // в ДРУГОЙ вкладке/окне того же сайта — то есть когда ведущий сохраняет
-    // настройки на странице admin.html.
-    window.addEventListener('storage', (e) => {
-      if (e.key !== FORCE_WINNER_STORAGE_KEY) return;
-      applyForceWinnerState(readForceWinnerFromStorage());
+    // Способ 2: клик по невидимому пикселю в углу табло рулетки
+    $('hiddenAdminPixel').addEventListener('click', openAdminModal);
+
+    $('adminCloseBtn').addEventListener('click', closeAdminModal);
+
+    $('adminModal').addEventListener('click', (e) => {
+      if (e.target === e.currentTarget) closeAdminModal();
+    });
+
+    $('forceWinnerToggle').addEventListener('change', (e) => {
+      $('forceWinnerInput').disabled = !e.target.checked;
+      if (e.target.checked) $('forceWinnerInput').focus();
+    });
+
+    $('adminSaveBtn').addEventListener('click', () => {
+      const enabled = $('forceWinnerToggle').checked;
+      const nickname = $('forceWinnerInput').value.trim();
+
+      if (enabled && !nickname) {
+        showToast('Введите никнейм или выключите режим', true);
+        return;
+      }
+
+      state.forceWinner.enabled = enabled;
+      state.forceWinner.nickname = nickname;
+
+      $('forceWinnerIndicator').hidden = !enabled;
+
+      closeAdminModal();
+      showToast(enabled ? `Заданный победитель: ${nickname}` : 'Режим заданного победителя выключен');
     });
   }
 
@@ -766,18 +542,20 @@
     $('victoryModal').addEventListener('click', (e) => {
       if (e.target === e.currentTarget) hideVictoryModal();
     });
-
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && !$('victoryModal').hidden) hideVictoryModal();
-    });
   }
 
   function init() {
     $('footerYear').textContent = new Date().getFullYear();
 
+    // Если страница запущена внутри OBS Browser Source — помечаем body
+    // классом, чтобы CSS тоже мог спрятать служебные элементы (скрытый
+    // пиксель-триггер больше не нужен в этом рендере вообще).
+    if (isRunningInsideOBS()) {
+      document.body.classList.add('is-obs-source');
+    }
+
     initPlatformTabs();
     updatePlatformIndicator();
-    updateLinkModeHint();
     initInputModeSwitch();
     initKeywordFilterToggle();
 
@@ -785,7 +563,7 @@
     $('spinBtn').addEventListener('click', spin);
 
     initVictoryModalControls();
-    initForceWinnerSync();
+    initAdminModeTrigger();
     initMobileMenu();
 
     renderReelPlaceholder('Загрузите участников, чтобы начать');
