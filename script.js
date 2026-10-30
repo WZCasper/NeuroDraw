@@ -29,6 +29,11 @@
     }
   };
 
+  // Адрес Cloudflare Worker'а, который реально собирает комментаторов
+  // под видео YouTube через официальный YouTube Data API v3.
+  // Если воркер развёрнут на другом поддомене workers.dev — поменяйте только эту строку.
+  const YOUTUBE_WORKER_URL = 'https://neurodraw-api.webtkachdenis.workers.dev';
+
   const PLATFORM_LABELS = {
     youtube: 'YouTube',
     twitch: 'Twitch',
@@ -175,9 +180,65 @@
     return lines;
   }
 
-  function handleLoadParticipants() {
+  /** Общее завершение загрузки: применяет фильтры и обновляет интерфейс. */
+  function finishLoadingParticipants(rawText, options) {
     const btn = $('loadParticipantsBtn');
     const counter = $('participantsCounter');
+    const result = parseParticipants(rawText, options);
+
+    state.participants = result;
+
+    btn.classList.remove('is-loading');
+    btn.disabled = false;
+
+    if (result.length === 0) {
+      counter.textContent = 'Участников не найдено — проверьте фильтры';
+      counter.classList.remove('has-count');
+      $('spinBtn').disabled = true;
+      renderReelPlaceholder('Участники не найдены');
+      return;
+    }
+
+    counter.textContent = `Загружено участников: ${result.length}`;
+    counter.classList.add('has-count');
+    $('spinBtn').disabled = false;
+    renderReelIdle();
+    showToast(`Готово! Найдено участников: ${result.length}`);
+  }
+
+  /** Реальный сбор комментаторов под YouTube-видео через Cloudflare Worker. */
+  function loadParticipantsFromYoutubeLink(url, options) {
+    const btn = $('loadParticipantsBtn');
+    const counter = $('participantsCounter');
+
+    btn.classList.add('is-loading');
+    btn.disabled = true;
+
+    const endpoint = `${YOUTUBE_WORKER_URL}?url=${encodeURIComponent(url)}`;
+
+    fetch(endpoint)
+      .then((res) => res.json())
+      .then((data) => {
+        if (!data.success) {
+          btn.classList.remove('is-loading');
+          btn.disabled = false;
+          showToast(data.error || 'Не удалось собрать участников по ссылке', true);
+          return;
+        }
+        finishLoadingParticipants(data.participants.join('\n'), options);
+      })
+      .catch(() => {
+        btn.classList.remove('is-loading');
+        btn.disabled = false;
+        showToast('Не удалось связаться с сервером сбора участников. Проверьте соединение и попробуйте ещё раз.', true);
+      });
+  }
+
+  function handleLoadParticipants() {
+    const excludeDuplicates = $('filterDuplicates').checked;
+    const keywordEnabled = $('filterKeywordEnabled').checked;
+    const keyword = $('filterKeywordInput').value;
+    const options = { excludeDuplicates, keywordEnabled, keyword };
 
     // Валидация в зависимости от выбранного режима ввода
     if (state.inputMode === 'link') {
@@ -186,46 +247,31 @@
         showToast('Вставьте ссылку или переключитесь на ручной ввод списка', true);
         return;
       }
-      showToast('Автосбор по ссылке требует подключения API платформы. Используйте вкладку «Список ников».', true);
+
+      if (state.platform !== 'youtube') {
+        showToast('Автосбор по ссылке пока реализован только для YouTube. Для этой платформы используйте вкладку «Список ников».', true);
+        return;
+      }
+
+      loadParticipantsFromYoutubeLink(url, options);
       return;
     }
 
     const rawText = $('participantsInput').value;
-    const excludeDuplicates = $('filterDuplicates').checked;
-    const keywordEnabled = $('filterKeywordEnabled').checked;
-    const keyword = $('filterKeywordInput').value;
 
     if (!rawText.trim()) {
       showToast('Добавьте хотя бы одного участника', true);
       return;
     }
 
-    // Небольшая имитация процесса загрузки для наглядности UI — чисто визуальный индикатор,
-    // сам список участников формируется мгновенно и полностью реально (без фейковых данных).
+    const btn = $('loadParticipantsBtn');
     btn.classList.add('is-loading');
     btn.disabled = true;
 
+    // Небольшая пауза для наглядности UI — сам список участников формируется
+    // мгновенно и полностью реально (без фейковых данных).
     setTimeout(() => {
-      const result = parseParticipants(rawText, { excludeDuplicates, keywordEnabled, keyword });
-
-      state.participants = result;
-
-      btn.classList.remove('is-loading');
-      btn.disabled = false;
-
-      if (result.length === 0) {
-        counter.textContent = 'Участников не найдено — проверьте фильтры';
-        counter.classList.remove('has-count');
-        $('spinBtn').disabled = true;
-        renderReelPlaceholder('Участники не найдены');
-        return;
-      }
-
-      counter.textContent = `Загружено участников: ${result.length}`;
-      counter.classList.add('has-count');
-      $('spinBtn').disabled = false;
-      renderReelIdle();
-      showToast(`Готово! Найдено участников: ${result.length}`);
+      finishLoadingParticipants(rawText, options);
     }, 450);
   }
 
