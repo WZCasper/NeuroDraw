@@ -109,7 +109,22 @@
           <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><rect x="2.5" y="2.5" width="19" height="19" rx="5.5" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="12" r="4.5" stroke="currentColor" stroke-width="1.8"/><circle cx="17.3" cy="6.7" r="1.1" fill="currentColor"/></svg>
           Instagram
         </button>
+        <button class="platform-tab" data-platform="telegram" role="tab" aria-selected="false">
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M2.5 11.3 20.8 4c.9-.35 1.7.2 1.4 1.55l-2.95 13.9c-.2.95-.8 1.2-1.6.75l-4.4-3.25-2.15 2.05c-.25.25-.45.45-.9.45l.3-4.5L18.5 7.3c.35-.3-.1-.5-.5-.2L8.3 13.15l-4.35-1.35c-.95-.3-.95-.95.2-1.5z" fill="currentColor"/></svg>
+          Telegram
+        </button>
       </div>
+
+      <label class="checkbox-row" style="margin-top:14px;">
+        <input type="checkbox" id="combinedModeToggle">
+        <span class="checkbox-box" aria-hidden="true"></span>
+        <span class="checkbox-text">Общий розыгрыш сразу среди нескольких платформ</span>
+      </label>
+      <p class="field-note" id="combinedModeNote">
+        Включите, загрузите участников с YouTube, переключитесь на другую платформу и загрузите ещё — списки
+        сложатся в один общий пул для розыгрыша, не заменяя друг друга.
+      </p>
+      <div class="participants-counter" id="combinedBreakdown" aria-live="polite" hidden></div>
     </div>
 
     <div class="panel-block">
@@ -129,12 +144,11 @@ stream_queen
 
       <!-- Режим: ссылка на видео/стрим -->
       <div class="input-mode-panel is-hidden" id="modeLink">
-        <label class="field-label" for="sourceUrlInput">Ссылка на видео, пост или стрим</label>
+        <label class="field-label" for="sourceUrlInput" id="sourceUrlLabel">Ссылка на видео, пост или стрим</label>
         <input id="sourceUrlInput" class="text-input" type="url" placeholder="https://...">
-        <p class="field-note">
-          Автоматический сбор комментариев с платформ требует подключения серверной части с официальными API-ключами
-          (YouTube Data API, Twitch API и т.д.) — это разовая техническая настройка на стороне владельца сайта.
-          Без неё вставьте участников вручную во вкладке «Список ников» — розыгрыш отработает полностью корректно.
+        <p class="field-note" id="sourceUrlNote">
+          Автосбор реально работает для YouTube, Twitch (чат в эфире) и Telegram (чат группы). Для TikTok и Instagram
+          пока не реализован — вставьте участников вручную во вкладке «Список ников».
         </p>
       </div>
     </div>
@@ -194,12 +208,13 @@ stream_queen
       </div>
     </div>
 
+    <label class="field-label" for="spinDurationInput">Время прокрутки (сек)</label>
+    <input id="spinDurationInput" type="number" min="1" step="1" value="5" class="text-input spin-duration-input" placeholder="Например: 5, 60, 86400">
+    <p class="field-note">Можно указать любое время — хоть 86400 секунд (сутки).</p>
+
     <button class="btn-spin" id="spinBtn" disabled>
       <span id="spinBtnLabel">Выбрать победителя</span>
     </button>
-
-    <!-- Скрытый пиксель-триггер админ-режима (угол экрана) -->
-    <button class="hidden-admin-pixel" id="hiddenAdminPixel" aria-label="" tabindex="-1"></button>
   </section>
 
 </main>
@@ -217,7 +232,7 @@ stream_queen
 
     <div class="victory-avatar" id="victoryAvatar">?</div>
     <p class="victory-eyebrow">Победитель розыгрыша</p>
-    <h3 class="victory-name" id="victoryName">—</h3>
+    <h3 class="victory-name"><a id="victoryName" href="#" target="_blank" rel="noopener noreferrer">—</a></h3>
 
     <div class="victory-platform" id="victoryPlatform">
       <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M21.6 7.2c-.25-1-1-1.75-2-2C17.9 4.7 12 4.7 12 4.7s-5.9 0-7.6.5c-1 .25-1.75 1-2 2C2 8.9 2 12 2 12s0 3.1.4 4.8c.25 1 1 1.75 2 2 1.7.5 7.6.5 7.6.5s5.9 0 7.6-.5c1-.25 1.75-1 2-2 .4-1.7.4-4.8.4-4.8s0-3.1-.4-4.8z" fill="currentColor"/><path d="M10 15.2V8.8L15.8 12 10 15.2z" fill="#fff"/></svg>
@@ -233,46 +248,12 @@ stream_queen
   </div>
 </div>
 
-<!-- ============================================================
-     СКРЫТОЕ АДМИН-ОКНО: ЗАДАННЫЙ ПОБЕДИТЕЛЬ (Shift + F8)
-     ============================================================ -->
-<div class="modal-overlay" id="adminModal" hidden>
-  <div class="modal-admin" role="dialog" aria-modal="true" aria-labelledby="adminTitle">
-    <button class="modal-close" id="adminCloseBtn" aria-label="Закрыть">
-      <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-    </button>
-
-    <h3 class="admin-title" id="adminTitle">Режим «Заданный победитель»</h3>
-    <p class="admin-sub">Служебная панель для тестирования. Автоматически не отображается на сцене OBS.</p>
-
-    <div class="admin-obs-note">
-      <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="10" cy="10" r="8.5" stroke="currentColor" stroke-width="1.6"/><path d="M10 6.5v4.5M10 13.5h.01" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-      <span>
-        Чтобы это окно гарантированно не попадало в трансляцию, добавьте NeuroDraw в OBS
-        источником <strong>«Браузер» (Browser Source)</strong> по ссылке на сайт — тогда панель
-        скрывается автоматически. Если вместо этого захватывать окно браузера целиком
-        (Window Capture), OBS покажет зрителям ровно то же, что видите вы на экране.
-      </span>
-    </div>
-
-    <label class="admin-toggle-row">
-      <span>Включить принудительный выбор</span>
-      <span class="switch">
-        <input type="checkbox" id="forceWinnerToggle">
-        <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
-      </span>
-    </label>
-
-    <label class="field-label" for="forceWinnerInput">Никнейм победителя</label>
-    <input id="forceWinnerInput" class="text-input" type="text" placeholder="Введите ник из списка участников" disabled>
-    <p class="field-note">
-      Если такого ника нет среди загруженных участников, он будет автоматически добавлен в список перед прокруткой.
-    </p>
-
-    <button class="btn-primary admin-save-btn" id="adminSaveBtn">Сохранить</button>
-  </div>
-</div>
-
+<!-- Режим "Заданный победитель" (Shift + F8) теперь открывается отдельной страницей
+     admin.html в новом окне — а не модалкой внутри этого документа. Это гарантирует,
+     а не предполагает, что панель не попадёт в OBS: OBS Browser Source рендерит ровно
+     тот документ, что указан в источнике (index.html), и никогда не видит содержимое
+     других окон/вкладок браузера, в отличие от проверки по user-agent, которая у OBS
+     по умолчанию ничем не отличается от обычного Chrome. -->
 <!-- ============================================================
      ПОДВАЛ (FOOTER)
      ============================================================ -->

@@ -3,12 +3,15 @@
    Разделы:
      1. Состояние приложения
      2. Утилиты
-     3. Платформы и переключение режимов ввода
-     4. Фильтрация и загрузка участников
-     5. Барабан рулетки (анимация прокрутки)
-     6. Модальное окно победителя
-     7. Скрытый админ-режим "Заданный победитель" (Shift + F8)
-     8. Мобильное меню, тосты, инициализация
+     3. Платформы, режимы ввода, общий розыгрыш по нескольким платформам
+     4. Фильтрация и загрузка участников (список)
+     5. YouTube — реальный сбор комментаторов (Cloudflare Worker)
+     6. Twitch — реальный сбор из чата во время эфира (анонимный IRC)
+     7. Telegram — реальный сбор из чата группы (Worker + вебхук + KV)
+     8. Барабан рулетки (анимация прокрутки, настраиваемое время)
+     9. Модальное окно победителя (кликабельный ник)
+     10. Режим "Заданный победитель" (Shift + F8 → отдельная admin.html)
+     11. Мобильное меню, общая инициализация
    ==================================================================== */
 
 (() => {
@@ -19,29 +22,32 @@
      ------------------------------------------------------------------ */
 
   const state = {
-    platform: 'youtube',           // текущая выбранная платформа
+    platform: 'youtube',           // текущая выбранная платформа (для одиночного режима)
     inputMode: 'list',             // 'list' | 'link'
-    participants: [],              // итоговый список участников после фильтрации
-    isSpinning: false,             // идёт ли сейчас прокрутка барабана
-    forceWinner: {
-      enabled: false,              // включён ли режим принудительного победителя
-      nickname: ''                 // заданный ник
-    }
+    combinedMode: false,           // общий розыгрыш сразу среди нескольких платформ
+    participants: [],              // [{ name, url, platform }]
+    isSpinning: false,
+    forceWinner: { enabled: false, nickname: '' }
   };
+
+  // Адрес Cloudflare Worker'а — реальный бэкенд для YouTube и Telegram.
+  const API_BASE_URL = 'https://neurodraw-api.webtkachdenis.workers.dev';
+  const TELEGRAM_POLL_INTERVAL_MS = 2000;
 
   const PLATFORM_LABELS = {
     youtube: 'YouTube',
     twitch: 'Twitch',
     tiktok: 'TikTok',
-    instagram: 'Instagram'
+    instagram: 'Instagram',
+    telegram: 'Telegram'
   };
 
-  // SVG-иконки платформ переиспользуются в индикаторе и в карточке победителя
   const PLATFORM_ICONS = {
     youtube: '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M21.6 7.2c-.25-1-1-1.75-2-2C17.9 4.7 12 4.7 12 4.7s-5.9 0-7.6.5c-1 .25-1.75 1-2 2C2 8.9 2 12 2 12s0 3.1.4 4.8c.25 1 1 1.75 2 2 1.7.5 7.6.5 7.6.5s5.9 0 7.6-.5c1-.25 1.75-1 2-2 .4-1.7.4-4.8.4-4.8s0-3.1-.4-4.8z" fill="currentColor"/><path d="M10 15.2V8.8L15.8 12 10 15.2z" fill="#fff"/></svg>',
     twitch: '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M4.5 2.5 3 6.5v13h5v2.5l3-2.5h4L20.5 14V2.5h-16z" fill="currentColor"/><rect x="9.5" y="7" width="1.6" height="5.2" fill="#fff"/><rect x="14" y="7" width="1.6" height="5.2" fill="#fff"/></svg>',
     tiktok: '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M16.6 2h-3.3v13.6a2.7 2.7 0 1 1-2.3-2.7v-3.3a6 6 0 1 0 5.6 6V8.4c1.1.8 2.4 1.3 3.9 1.3V6.4c-2.1 0-3.9-1.8-3.9-4.4z" fill="currentColor"/></svg>',
-    instagram: '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><rect x="2.5" y="2.5" width="19" height="19" rx="5.5" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="12" r="4.5" stroke="currentColor" stroke-width="1.8"/><circle cx="17.3" cy="6.7" r="1.1" fill="currentColor"/></svg>'
+    instagram: '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><rect x="2.5" y="2.5" width="19" height="19" rx="5.5" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="12" r="4.5" stroke="currentColor" stroke-width="1.8"/><circle cx="17.3" cy="6.7" r="1.1" fill="currentColor"/></svg>',
+    telegram: '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M2.5 11.3 20.8 4c.9-.35 1.7.2 1.4 1.55l-2.95 13.9c-.2.95-.8 1.2-1.6.75l-4.4-3.25-2.15 2.05c-.25.25-.45.45-.9.45l.3-4.5L18.5 7.3c.35-.3-.1-.5-.5-.2L8.3 13.15l-4.35-1.35c-.95-.3-.95-.95.2-1.5z" fill="currentColor"/></svg>'
   };
 
   /* ------------------------------------------------------------------
@@ -50,42 +56,46 @@
 
   const $ = (id) => document.getElementById(id);
 
-  /** Показывает короткое тост-уведомление внизу экрана. */
   function showToast(message, isError = false) {
     const toast = $('toast');
     toast.textContent = message;
     toast.classList.toggle('is-error', isError);
     toast.classList.add('is-visible');
     clearTimeout(showToast._timer);
-    showToast._timer = setTimeout(() => {
-      toast.classList.remove('is-visible');
-    }, 2600);
+    showToast._timer = setTimeout(() => toast.classList.remove('is-visible'), 2600);
   }
 
-  /** Возвращает случайное целое число в диапазоне [min, max]. */
   function randomInt(min, max) {
     return Math.floor(Math.random() * (max - min + 1)) + min;
   }
 
-  /** Выбирает один случайный элемент массива (криптографически не обязателен — честная бытовая случайность). */
   function pickRandom(arr) {
     return arr[randomInt(0, arr.length - 1)];
   }
 
-  /** Первая буква ника для аватара-заглушки в модалке победителя. */
   function initialOf(name) {
     const trimmed = (name || '').trim();
     return trimmed ? trimmed.charAt(0).toUpperCase() : '?';
   }
 
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
   /* ------------------------------------------------------------------
-     3. ПЛАТФОРМЫ И ПЕРЕКЛЮЧЕНИЕ РЕЖИМОВ ВВОДА
+     3. ПЛАТФОРМЫ, РЕЖИМЫ ВВОДА, ОБЩИЙ РОЗЫГРЫШ
      ------------------------------------------------------------------ */
 
   function initPlatformTabs() {
     const tabs = document.querySelectorAll('.platform-tab');
     tabs.forEach((tab) => {
       tab.addEventListener('click', () => {
+        // Переключение платформы на середине активного сбора — отменяем его без применения
+        if (twitchSocket) cancelTwitchCollection();
+        if (telegramChatId) cancelTelegramCollection();
+
         tabs.forEach((t) => {
           t.classList.remove('is-active');
           t.setAttribute('aria-selected', 'false');
@@ -95,8 +105,14 @@
 
         state.platform = tab.dataset.platform;
         updatePlatformIndicator();
+        updateLinkModeHint();
       });
     });
+  }
+
+  function setPlatformColorClass(el, platform) {
+    Object.keys(PLATFORM_LABELS).forEach((pf) => el.classList.remove(`is-${pf}`));
+    el.classList.add(`is-${platform}`);
   }
 
   function updatePlatformIndicator() {
@@ -106,12 +122,16 @@
     if (svg) svg.remove();
     indicator.insertAdjacentHTML('afterbegin', PLATFORM_ICONS[state.platform]);
     label.textContent = PLATFORM_LABELS[state.platform];
+    setPlatformColorClass(indicator, state.platform);
   }
 
   function initInputModeSwitch() {
     const modeTabs = document.querySelectorAll('.mode-tab');
     modeTabs.forEach((tab) => {
       tab.addEventListener('click', () => {
+        if (twitchSocket) cancelTwitchCollection();
+        if (telegramChatId) cancelTelegramCollection();
+
         modeTabs.forEach((t) => {
           t.classList.remove('is-active');
           t.setAttribute('aria-selected', 'false');
@@ -126,6 +146,74 @@
     });
   }
 
+  function updateLinkModeHint() {
+    const label = $('sourceUrlLabel');
+    const input = $('sourceUrlInput');
+    const note = $('sourceUrlNote');
+    const btnLabel = $('loadParticipantsBtn').querySelector('.btn-load-label');
+
+    if (state.platform === 'youtube') {
+      label.textContent = 'Ссылка на видео, пост или стрим';
+      input.type = 'url';
+      input.placeholder = 'https://www.youtube.com/watch?v=...';
+      note.textContent = 'Автосбор реально работает: подставляются настоящие авторы комментариев под указанным видео.';
+      btnLabel.textContent = 'Загрузить участников';
+    } else if (state.platform === 'twitch') {
+      label.textContent = 'Имя канала Twitch или ссылка на стрим';
+      input.type = 'text';
+      input.placeholder = 'twitch.tv/канал или просто имя канала';
+      note.textContent = 'Канал должен быть в эфире. Нажмите «Начать сбор из чата» — сайт анонимно подключится к чату '
+        + 'и будет собирать ники написавших, пока вы не нажмёте «Остановить и применить».';
+      btnLabel.textContent = 'Начать сбор из чата';
+    } else if (state.platform === 'telegram') {
+      label.textContent = 'Юзернейм, ссылка или ID группы Telegram';
+      input.type = 'text';
+      input.placeholder = '@group или t.me/group';
+      note.textContent = 'Бот должен быть добавлен в группу. Нажмите «Начать сбор» — бот будет слушать сообщения '
+        + 'и собирать ники написавших, пока вы не нажмёте «Остановить и применить».';
+      btnLabel.textContent = 'Начать сбор из группы';
+    } else {
+      label.textContent = 'Ссылка на видео, пост или стрим';
+      input.type = 'url';
+      input.placeholder = 'https://...';
+      note.textContent = 'Для этой платформы автосбор по ссылке пока не реализован — вставьте участников вручную '
+        + 'во вкладке «Список ников».';
+      btnLabel.textContent = 'Загрузить участников';
+    }
+  }
+
+  function initCombinedModeToggle() {
+    $('combinedModeToggle').addEventListener('change', (e) => {
+      state.combinedMode = e.target.checked;
+      $('combinedBreakdown').hidden = !state.combinedMode || state.participants.length === 0;
+      if (!state.combinedMode) {
+        // Выключили общий режим — очищаем смешанный пул, чтобы не разыгрывать случайно несколько платформ сразу
+        state.participants = [];
+        renderReelPlaceholder('Загрузите участников, чтобы начать');
+        $('participantsCounter').textContent = 'Участников не загружено';
+        $('participantsCounter').classList.remove('has-count');
+        $('spinBtn').disabled = true;
+      }
+      renderCombinedBreakdown();
+    });
+  }
+
+  function renderCombinedBreakdown() {
+    const el = $('combinedBreakdown');
+    if (!state.combinedMode || state.participants.length === 0) {
+      el.hidden = true;
+      return;
+    }
+    const counts = {};
+    state.participants.forEach((p) => {
+      counts[p.platform] = (counts[p.platform] || 0) + 1;
+    });
+    el.innerHTML = Object.keys(counts)
+      .map((pf) => `<span class="combined-badge">${PLATFORM_LABELS[pf] || pf}: ${counts[pf]}</span>`)
+      .join('') + `<span class="combined-badge">Всего: ${state.participants.length}</span>`;
+    el.hidden = false;
+  }
+
   function initKeywordFilterToggle() {
     const checkbox = $('filterKeywordEnabled');
     const input = $('filterKeywordInput');
@@ -136,27 +224,24 @@
     });
   }
 
+  function currentFilterOptions() {
+    return {
+      excludeDuplicates: $('filterDuplicates').checked,
+      keywordEnabled: $('filterKeywordEnabled').checked,
+      keyword: $('filterKeywordInput').value
+    };
+  }
+
   /* ------------------------------------------------------------------
-     4. ФИЛЬТРАЦИЯ И ЗАГРУЗКА УЧАСТНИКОВ
+     4. ЗАГРУЗКА УЧАСТНИКОВ — РУЧНОЙ СПИСОК
      ------------------------------------------------------------------ */
 
-  /**
-   * Разбирает многострочный текст в список ников:
-   * - убирает пустые строки и пробелы по краям;
-   * - при необходимости убирает дубликаты (без учёта регистра);
-   * - при необходимости оставляет только строки с ключевым словом.
-   */
-  function parseParticipants(rawText, options) {
-    let lines = rawText
-      .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0);
+  function parseParticipantNames(rawText, options) {
+    let lines = rawText.split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
 
     if (options.keywordEnabled && options.keyword) {
       const kw = options.keyword.trim().toLowerCase();
-      if (kw) {
-        lines = lines.filter((line) => line.toLowerCase().includes(kw));
-      }
+      if (kw) lines = lines.filter((l) => l.toLowerCase().includes(kw));
     }
 
     if (options.excludeDuplicates) {
@@ -175,66 +260,437 @@
     return lines;
   }
 
-  function handleLoadParticipants() {
+  /**
+   * Применяет итог загрузки (ручной список или автосбор) к общему состоянию:
+   * в обычном режиме — заменяет пул; во "общем розыгрыше" — добавляет к нему,
+   * исключая повторы одного и того же ника с одной и той же платформы.
+   */
+  function applyLoadedParticipants(items) {
     const btn = $('loadParticipantsBtn');
     const counter = $('participantsCounter');
 
-    // Валидация в зависимости от выбранного режима ввода
-    if (state.inputMode === 'link') {
-      const url = $('sourceUrlInput').value.trim();
-      if (!url) {
-        showToast('Вставьте ссылку или переключитесь на ручной ввод списка', true);
-        return;
-      }
-      showToast('Автосбор по ссылке требует подключения API платформы. Используйте вкладку «Список ников».', true);
+    btn.classList.remove('is-loading');
+    btn.disabled = false;
+
+    if (items.length === 0 && !state.combinedMode) {
+      counter.textContent = 'Участников не найдено — проверьте фильтры';
+      counter.classList.remove('has-count');
+      $('spinBtn').disabled = true;
+      renderReelPlaceholder('Участники не найдены');
       return;
     }
 
+    if (state.combinedMode) {
+      const existingKeys = new Set(state.participants.map((p) => `${p.platform}:${p.name.toLowerCase()}`));
+      const added = items.filter((p) => !existingKeys.has(`${p.platform}:${p.name.toLowerCase()}`));
+      state.participants = state.participants.concat(added);
+      showToast(`Добавлено с ${PLATFORM_LABELS[state.platform]}: ${added.length} (всего в пуле: ${state.participants.length})`);
+    } else {
+      state.participants = items;
+      showToast(`Готово! Найдено участников: ${items.length}`);
+    }
+
+    renderCombinedBreakdown();
+
+    if (state.participants.length === 0) {
+      counter.textContent = 'Участников не загружено';
+      counter.classList.remove('has-count');
+      $('spinBtn').disabled = true;
+      renderReelPlaceholder('Загрузите участников, чтобы начать');
+      return;
+    }
+
+    counter.textContent = `Загружено участников: ${state.participants.length}`;
+    counter.classList.add('has-count');
+    $('spinBtn').disabled = false;
+    renderReelIdle();
+  }
+
+  function handleManualListLoad() {
+    const btn = $('loadParticipantsBtn');
     const rawText = $('participantsInput').value;
-    const excludeDuplicates = $('filterDuplicates').checked;
-    const keywordEnabled = $('filterKeywordEnabled').checked;
-    const keyword = $('filterKeywordInput').value;
 
     if (!rawText.trim()) {
       showToast('Добавьте хотя бы одного участника', true);
       return;
     }
 
-    // Небольшая имитация процесса загрузки для наглядности UI — чисто визуальный индикатор,
-    // сам список участников формируется мгновенно и полностью реально (без фейковых данных).
     btn.classList.add('is-loading');
     btn.disabled = true;
 
     setTimeout(() => {
-      const result = parseParticipants(rawText, { excludeDuplicates, keywordEnabled, keyword });
-
-      state.participants = result;
-
-      btn.classList.remove('is-loading');
-      btn.disabled = false;
-
-      if (result.length === 0) {
-        counter.textContent = 'Участников не найдено — проверьте фильтры';
-        counter.classList.remove('has-count');
-        $('spinBtn').disabled = true;
-        renderReelPlaceholder('Участники не найдены');
-        return;
-      }
-
-      counter.textContent = `Загружено участников: ${result.length}`;
-      counter.classList.add('has-count');
-      $('spinBtn').disabled = false;
-      renderReelIdle();
-      showToast(`Готово! Найдено участников: ${result.length}`);
-    }, 450);
+      const names = parseParticipantNames(rawText, currentFilterOptions());
+      // Ручной список: у нас нет настоящей ссылки на профиль — честно не делаем её кликабельной
+      const items = names.map((name) => ({ name, url: null, platform: state.platform }));
+      applyLoadedParticipants(items);
+    }, 350);
   }
 
   /* ------------------------------------------------------------------
-     5. БАРАБАН РУЛЕТКИ
+     5. YOUTUBE — реальный сбор комментаторов через Cloudflare Worker
      ------------------------------------------------------------------ */
 
-  const ITEM_HEIGHT = 86;        // должно совпадать с .reel-item { height } в CSS (десктоп)
-  const ITEM_HEIGHT_MOBILE = 70; // совпадает с мобильным брейкпоинтом в CSS
+  function loadParticipantsFromYoutubeLink(url) {
+    const btn = $('loadParticipantsBtn');
+    btn.classList.add('is-loading');
+    btn.disabled = true;
+
+    fetch(`${API_BASE_URL}/youtube?url=${encodeURIComponent(url)}`)
+      .then((res) => res.json())
+      .then((data) => {
+        btn.classList.remove('is-loading');
+        btn.disabled = false;
+        if (!data.success) {
+          showToast(data.error || 'Не удалось собрать участников по ссылке', true);
+          return;
+        }
+        const items = data.participants.map((p) => ({
+          name: typeof p === 'string' ? p : p.name,
+          url: typeof p === 'string' ? null : (p.url || null),
+          platform: 'youtube'
+        }));
+        applyLoadedParticipants(items);
+      })
+      .catch(() => {
+        btn.classList.remove('is-loading');
+        btn.disabled = false;
+        showToast('Не удалось связаться с сервером сбора участников. Проверьте соединение и попробуйте ещё раз.', true);
+      });
+  }
+
+  /* ------------------------------------------------------------------
+     6. TWITCH — сбор ников прямо из чата во время эфира.
+     Анонимное read-only подключение к Twitch IRC (логин вида
+     justinfanXXXXX) — официально поддерживаемый Twitch способ читать
+     публичный чат без OAuth. Никаких списков заранее, только реально
+     написавшие.
+     ------------------------------------------------------------------ */
+
+  const TWITCH_WS_URL = 'wss://irc-ws.chat.twitch.tv:443';
+  const TWITCH_MAX_COLLECT_MS = 15 * 60 * 1000;
+
+  let twitchSocket = null;
+  let twitchCollected = null; // Map<логин, displayName>
+  let twitchAutoStopTimer = null;
+
+  function extractTwitchChannel(raw) {
+    const value = raw.trim();
+    if (!value) return null;
+    if (/^[a-zA-Z0-9_]{3,25}$/.test(value)) return value.toLowerCase();
+    try {
+      const url = new URL(value.includes('://') ? value : `https://${value}`);
+      const host = url.hostname.replace(/^www\./, '');
+      if (host === 'twitch.tv' || host === 'm.twitch.tv') {
+        const parts = url.pathname.split('/').filter(Boolean);
+        if (parts.length) return parts[0].toLowerCase();
+      }
+    } catch { /* не ссылка */ }
+    return null;
+  }
+
+  function stopTwitchCollection() {
+    if (twitchAutoStopTimer) {
+      clearTimeout(twitchAutoStopTimer);
+      twitchAutoStopTimer = null;
+    }
+    if (twitchSocket) {
+      const socket = twitchSocket;
+      twitchSocket = null;
+      socket.onclose = null;
+      socket.onerror = null;
+      socket.onmessage = null;
+      socket.close();
+    }
+  }
+
+  function resetLoadButton(defaultLabel) {
+    const btn = $('loadParticipantsBtn');
+    btn.classList.remove('is-loading');
+    btn.disabled = false;
+    btn.querySelector('.btn-load-label').textContent = defaultLabel;
+  }
+
+  function cancelTwitchCollection() {
+    stopTwitchCollection();
+    twitchCollected = null;
+    resetLoadButton('Начать сбор из чата');
+    const counter = $('participantsCounter');
+    counter.textContent = state.participants.length
+      ? `Загружено участников: ${state.participants.length}`
+      : 'Участников не загружено';
+  }
+
+  function finishTwitchCollection() {
+    const channel = twitchCollected;
+    stopTwitchCollection();
+    const names = channel ? Array.from(channel.entries()) : [];
+    twitchCollected = null;
+    resetLoadButton('Начать сбор из чата');
+
+    if (names.length === 0) {
+      showToast('За время сбора в чате не появилось ни одного сообщения', true);
+      return;
+    }
+    const items = names.map(([login, displayName]) => ({
+      name: displayName,
+      url: `https://www.twitch.tv/${login}`,
+      platform: 'twitch'
+    }));
+    applyLoadedParticipants(items);
+  }
+
+  function startTwitchCollection(channel) {
+    const btn = $('loadParticipantsBtn');
+    const counter = $('participantsCounter');
+    twitchCollected = new Map();
+
+    const socket = new WebSocket(TWITCH_WS_URL);
+    twitchSocket = socket;
+
+    socket.onopen = () => {
+      const anonNick = `justinfan${Math.floor(10000 + Math.random() * 80000)}`;
+      socket.send('PASS SCHMOOPIIE');
+      socket.send(`NICK ${anonNick}`);
+      socket.send('CAP REQ :twitch.tv/tags');
+      socket.send(`JOIN #${channel}`);
+    };
+
+    socket.onmessage = (event) => {
+      if (twitchSocket !== socket) return;
+      const lines = String(event.data).split('\r\n').filter(Boolean);
+      for (const line of lines) {
+        if (line.startsWith('PING')) { socket.send('PONG :tmi.twitch.tv'); continue; }
+        if (!line.includes('PRIVMSG')) continue;
+
+        let tagsPart = '';
+        let rest = line;
+        if (line.startsWith('@')) {
+          const spaceIdx = line.indexOf(' ');
+          tagsPart = line.slice(1, spaceIdx);
+          rest = line.slice(spaceIdx + 1);
+        }
+        const prefixMatch = rest.match(/^:([^!]+)!/);
+        if (!prefixMatch) continue;
+        const loginName = prefixMatch[1].toLowerCase();
+
+        let displayName = loginName;
+        if (tagsPart) {
+          const dnMatch = tagsPart.match(/display-name=([^;]*)/);
+          if (dnMatch && dnMatch[1]) displayName = dnMatch[1];
+        }
+
+        if (!twitchCollected.has(loginName)) {
+          twitchCollected.set(loginName, displayName);
+          counter.textContent = `Собираю из чата: ${twitchCollected.size} чел. — нажмите «Остановить и применить», когда будете готовы`;
+          counter.classList.add('has-count');
+        }
+      }
+    };
+
+    socket.onerror = () => {
+      if (twitchSocket !== socket) return;
+      showToast('Не удалось подключиться к чату Twitch. Проверьте имя канала и подключение к интернету.', true);
+      finishTwitchCollection();
+    };
+
+    socket.onclose = () => {
+      if (twitchSocket !== socket) return;
+      finishTwitchCollection();
+    };
+
+    btn.classList.add('is-loading');
+    btn.disabled = false;
+    btn.querySelector('.btn-load-label').textContent = 'Остановить и применить';
+    counter.textContent = 'Подключаюсь к чату…';
+    counter.classList.add('has-count');
+
+    twitchAutoStopTimer = setTimeout(() => {
+      showToast('Сбор остановлен автоматически по таймеру (15 минут), список применён', false);
+      finishTwitchCollection();
+    }, TWITCH_MAX_COLLECT_MS);
+  }
+
+  /* ------------------------------------------------------------------
+     7. TELEGRAM — сбор ников из чата группы через Cloudflare Worker
+     (вебхук + KV), опрос статуса поллингом, т.к. WebSocket к Telegram
+     из браузера невозможен.
+     ------------------------------------------------------------------ */
+
+  let telegramChatId = null;
+  let telegramPollTimer = null;
+
+  function extractTelegramChat(raw) {
+    const value = raw.trim();
+    if (!value) return null;
+    if (/^-?\d+$/.test(value)) return value;
+    if (value.startsWith('@')) return value;
+    try {
+      const url = new URL(value.includes('://') ? value : `https://${value}`);
+      const host = url.hostname.replace(/^www\./, '');
+      if (host === 't.me' || host === 'telegram.me') {
+        const parts = url.pathname.split('/').filter(Boolean);
+        if (parts.length) return `@${parts[0]}`;
+      }
+    } catch { /* не ссылка */ }
+    if (/^[a-zA-Z0-9_]{5,32}$/.test(value)) return `@${value}`;
+    return null;
+  }
+
+  function stopTelegramPolling() {
+    if (telegramPollTimer) {
+      clearInterval(telegramPollTimer);
+      telegramPollTimer = null;
+    }
+  }
+
+  function cancelTelegramCollection() {
+    stopTelegramPolling();
+    const chatId = telegramChatId;
+    telegramChatId = null;
+    resetLoadButton('Начать сбор из группы');
+    const counter = $('participantsCounter');
+    counter.textContent = state.participants.length
+      ? `Загружено участников: ${state.participants.length}`
+      : 'Участников не загружено';
+
+    if (chatId) {
+      fetch(`${API_BASE_URL}/telegram/collect/stop`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatId })
+      }).catch(() => {});
+    }
+  }
+
+  function pollTelegramStatus(chatId) {
+    const counter = $('participantsCounter');
+    telegramPollTimer = setInterval(() => {
+      fetch(`${API_BASE_URL}/telegram/collect/status?chatId=${encodeURIComponent(chatId)}`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (!data.success) return;
+          counter.textContent = `Собираю из группы: ${data.count} чел. — нажмите «Остановить и применить», когда будете готовы`;
+          counter.classList.add('has-count');
+        })
+        .catch(() => {});
+    }, TELEGRAM_POLL_INTERVAL_MS);
+  }
+
+  function finishTelegramCollection() {
+    const btn = $('loadParticipantsBtn');
+    const chatId = telegramChatId;
+    stopTelegramPolling();
+    telegramChatId = null;
+    btn.disabled = true;
+
+    fetch(`${API_BASE_URL}/telegram/collect/stop`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chatId })
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        resetLoadButton('Начать сбор из группы');
+        if (!data.success) {
+          showToast(data.error || 'Участников собрать не удалось', true);
+          return;
+        }
+        const items = data.participants.map((p) => ({
+          name: p,
+          url: p.startsWith('@') ? `https://t.me/${p.slice(1)}` : null,
+          platform: 'telegram'
+        }));
+        applyLoadedParticipants(items);
+      })
+      .catch(() => {
+        resetLoadButton('Начать сбор из группы');
+        showToast('Не удалось связаться с сервером сбора участников', true);
+      });
+  }
+
+  function startTelegramCollection(chatInput) {
+    const btn = $('loadParticipantsBtn');
+    btn.disabled = true;
+
+    fetch(`${API_BASE_URL}/telegram/resolve?chat=${encodeURIComponent(chatInput)}`)
+      .then((res) => res.json())
+      .then((resolveData) => {
+        if (!resolveData.success) {
+          btn.disabled = false;
+          showToast(resolveData.error || 'Не удалось найти группу', true);
+          return;
+        }
+        return fetch(`${API_BASE_URL}/telegram/collect/start`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chatId: resolveData.chatId })
+        })
+          .then((res) => res.json())
+          .then((startData) => {
+            btn.disabled = false;
+            if (!startData.success) {
+              showToast(startData.error || 'Не удалось начать сбор', true);
+              return;
+            }
+            telegramChatId = resolveData.chatId;
+            btn.classList.add('is-loading');
+            btn.querySelector('.btn-load-label').textContent = 'Остановить и применить';
+
+            const counter = $('participantsCounter');
+            counter.textContent = `Собираю из группы «${resolveData.title}»: 0 чел.`;
+            counter.classList.add('has-count');
+
+            pollTelegramStatus(resolveData.chatId);
+          });
+      })
+      .catch(() => {
+        btn.disabled = false;
+        showToast('Не удалось связаться с сервером сбора участников', true);
+      });
+  }
+
+  /* ------------------------------------------------------------------
+     ОБЩИЙ ОБРАБОТЧИК КНОПКИ «Загрузить участников / Начать сбор»
+     ------------------------------------------------------------------ */
+
+  function handleLoadParticipants() {
+    if (state.inputMode === 'link') {
+      if (state.platform === 'twitch') {
+        if (twitchSocket) { finishTwitchCollection(); return; }
+        const channel = extractTwitchChannel($('sourceUrlInput').value);
+        if (!channel) { showToast('Введите имя канала Twitch или ссылку вида twitch.tv/канал', true); return; }
+        startTwitchCollection(channel);
+        return;
+      }
+
+      if (state.platform === 'telegram') {
+        if (telegramChatId) { finishTelegramCollection(); return; }
+        const chatInput = extractTelegramChat($('sourceUrlInput').value);
+        if (!chatInput) { showToast('Введите юзернейм (@группа), ссылку t.me/группа или числовой ID', true); return; }
+        startTelegramCollection(chatInput);
+        return;
+      }
+
+      const url = $('sourceUrlInput').value.trim();
+      if (!url) { showToast('Вставьте ссылку или переключитесь на ручной ввод списка', true); return; }
+
+      if (state.platform !== 'youtube') {
+        showToast('Автосбор по ссылке реализован для YouTube, Twitch (чат в эфире) и Telegram (чат группы). Для этой платформы используйте вкладку «Список ников».', true);
+        return;
+      }
+      loadParticipantsFromYoutubeLink(url);
+      return;
+    }
+
+    handleManualListLoad();
+  }
+
+  /* ------------------------------------------------------------------
+     8. БАРАБАН РУЛЕТКИ
+     ------------------------------------------------------------------ */
+
+  const ITEM_HEIGHT = 86;
+  const ITEM_HEIGHT_MOBILE = 70;
 
   function currentItemHeight() {
     return window.matchMedia('(max-width: 640px)').matches ? ITEM_HEIGHT_MOBILE : ITEM_HEIGHT;
@@ -247,62 +703,56 @@
   }
 
   function renderReelIdle() {
-    // Показываем первых участников статично, барабан ещё не крутится
     const track = $('reelTrack');
     const preview = state.participants.slice(0, 5);
     track.style.transform = `translateY(${-currentItemHeight() / 2}px)`;
     track.innerHTML = preview
-      .map((name, i) => `<div class="reel-item${i === 0 ? ' is-center' : ''}">${escapeHtml(name)}</div>`)
+      .map((p, i) => `<div class="reel-item${i === 0 ? ' is-center' : ''}">${escapeHtml(p.name)}</div>`)
       .join('');
   }
 
-  function escapeHtml(str) {
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
-  }
-
-  /**
-   * Определяет победителя с учётом режима "Заданный победитель".
-   * Если режим включён и ник задан — возвращает его (добавляя в список участников,
-   * если там его ещё нет), иначе выбирает случайного участника.
-   */
   function resolveWinner() {
     if (state.forceWinner.enabled && state.forceWinner.nickname.trim()) {
       const target = state.forceWinner.nickname.trim();
-      const alreadyInList = state.participants.some(
-        (p) => p.toLowerCase() === target.toLowerCase()
-      );
-      if (!alreadyInList) {
-        state.participants.push(target);
-      }
-      return target;
+      const already = state.participants.find((p) => p.name.toLowerCase() === target.toLowerCase());
+      if (already) return already;
+      const forced = { name: target, url: null, platform: state.platform };
+      state.participants.push(forced);
+      return forced;
     }
     return pickRandom(state.participants);
   }
 
-  /**
-   * Строит длинную прокручиваемую ленту ников так, чтобы она естественно
-   * заканчивалась на имени победителя по центру окна (под указателем).
-   */
   function buildReelSequence(winner) {
     const pool = state.participants;
-    const REPEAT_ROUNDS = 4; // сколько раз "прогоняем" весь список перед остановкой — создаёт ощущение вращения
+    const REPEAT_ROUNDS = 4;
     const sequence = [];
-
     for (let round = 0; round < REPEAT_ROUNDS; round++) {
-      const shuffled = [...pool].sort(() => Math.random() - 0.5);
-      sequence.push(...shuffled);
+      sequence.push(...[...pool].sort(() => Math.random() - 0.5));
     }
-
-    // Добавляем "подводку" к финалу: несколько случайных участников, затем победитель
     const tailLength = Math.min(6, Math.max(3, pool.length));
-    for (let i = 0; i < tailLength; i++) {
-      sequence.push(pickRandom(pool));
-    }
+    for (let i = 0; i < tailLength; i++) sequence.push(pickRandom(pool));
     sequence.push(winner);
-
     return sequence;
+  }
+
+  function highlightCenterItem(track, items, itemHeight) {
+    const matrix = window.WebKitCSSMatrix ? new WebKitCSSMatrix(getComputedStyle(track).transform) : null;
+    let translateY;
+    if (matrix) {
+      translateY = matrix.m42;
+    } else {
+      const style = getComputedStyle(track).transform;
+      const match = /matrix\(([^)]+)\)/.exec(style);
+      translateY = match ? parseFloat(match[1].split(',')[5]) : 0;
+    }
+    const centerIndex = Math.round((-translateY - itemHeight / 2) / itemHeight);
+    items.forEach((item, i) => item.classList.toggle('is-center', i === centerIndex));
+  }
+
+  function currentSpinDurationMs() {
+    const seconds = parseInt($('spinDurationInput').value, 10) || 5;
+    return seconds * 1000;
   }
 
   function spin() {
@@ -324,88 +774,67 @@
     const track = $('reelTrack');
     const itemHeight = currentItemHeight();
 
-    // Строим DOM-разметку всей последовательности
-    track.innerHTML = sequence
-      .map((name) => `<div class="reel-item">${escapeHtml(name)}</div>`)
-      .join('');
-
+    track.innerHTML = sequence.map((p) => `<div class="reel-item">${escapeHtml(p.name)}</div>`).join('');
     const items = track.querySelectorAll('.reel-item');
     const winnerIndex = sequence.length - 1;
 
-    // Стартовая позиция: первый элемент по центру окна (под указателем)
     track.style.transition = 'none';
     track.style.transform = `translateY(${-itemHeight / 2}px)`;
-
-    // Принудительный reflow, чтобы браузер применил стартовую позицию до начала transition
     // eslint-disable-next-line no-unused-expressions
     track.offsetHeight;
 
     const finalOffset = -(winnerIndex * itemHeight) - itemHeight / 2;
-    const spinDuration = 4200; // мс — достаточно долго, чтобы прокрутка ощущалась плавной и честной
+    const spinDuration = currentSpinDurationMs();
 
     requestAnimationFrame(() => {
       track.style.transition = `transform ${spinDuration}ms cubic-bezier(0.12, 0.72, 0.1, 1)`;
       track.style.transform = `translateY(${finalOffset}px)`;
     });
 
-    // Подсвечиваем элемент по центру в процессе прокрутки
-    const highlightInterval = setInterval(() => {
-      highlightCenterItem(track, items, itemHeight);
-    }, 80);
+    const highlightInterval = setInterval(() => highlightCenterItem(track, items, itemHeight), 80);
 
     setTimeout(() => {
       clearInterval(highlightInterval);
       highlightCenterItem(track, items, itemHeight);
       items[winnerIndex].classList.add('is-winner');
 
-      state.isSpinning = false;
       spinBtn.disabled = false;
       spinBtn.classList.remove('is-spinning');
       $('spinBtnLabel').textContent = 'Выбрать победителя';
 
+      state.isSpinning = false;
       showVictoryModal(winner);
     }, spinDuration + 120);
   }
 
-  /** Подсвечивает элемент ленты, который сейчас находится под указателем центра. */
-  function highlightCenterItem(track, items, itemHeight) {
-    const matrix = new WebKitCSSMatrix
-      ? new WebKitCSSMatrix(getComputedStyle(track).transform)
-      : null;
-    let translateY;
-    if (matrix) {
-      translateY = matrix.m42;
-    } else {
-      const style = getComputedStyle(track).transform;
-      const match = /matrix\(([^)]+)\)/.exec(style);
-      translateY = match ? parseFloat(match[1].split(',')[5]) : 0;
-    }
-
-    const centerIndex = Math.round((-translateY - itemHeight / 2) / itemHeight);
-
-    items.forEach((item, i) => {
-      item.classList.toggle('is-center', i === centerIndex);
-    });
-  }
-
   /* ------------------------------------------------------------------
-     6. МОДАЛЬНОЕ ОКНО ПОБЕДИТЕЛЯ
+     9. МОДАЛЬНОЕ ОКНО ПОБЕДИТЕЛЯ
      ------------------------------------------------------------------ */
 
-  function showVictoryModal(winnerName) {
-    $('victoryAvatar').textContent = initialOf(winnerName);
-    $('victoryName').textContent = winnerName;
+  function showVictoryModal(winner) {
+    $('victoryAvatar').textContent = initialOf(winner.name);
 
-    const platformLabelEl = $('victoryPlatformLabel');
-    platformLabelEl.textContent = PLATFORM_LABELS[state.platform];
+    const nameLink = $('victoryName');
+    nameLink.textContent = winner.name;
+    if (winner.url) {
+      nameLink.href = winner.url;
+      nameLink.classList.remove('is-not-clickable');
+      nameLink.removeAttribute('aria-disabled');
+    } else {
+      nameLink.href = '#';
+      nameLink.setAttribute('aria-disabled', 'true');
+      nameLink.addEventListener('click', (e) => e.preventDefault(), { once: true });
+    }
 
+    const platform = winner.platform || state.platform;
+    $('victoryPlatformLabel').textContent = PLATFORM_LABELS[platform] || platform;
     const platformWrap = $('victoryPlatform');
+    setPlatformColorClass(platformWrap, platform);
     const oldSvg = platformWrap.querySelector('svg');
     if (oldSvg) oldSvg.remove();
-    platformWrap.insertAdjacentHTML('afterbegin', PLATFORM_ICONS[state.platform]);
+    platformWrap.insertAdjacentHTML('afterbegin', PLATFORM_ICONS[platform] || '');
 
-    const modal = $('victoryModal');
-    modal.hidden = false;
+    $('victoryModal').hidden = false;
     spawnConfetti();
   }
 
@@ -418,7 +847,6 @@
     const container = $('modalConfetti');
     container.innerHTML = '';
     const colors = ['#4F46E5', '#7C3AED', '#22D3EE', '#059669', '#F59E0B'];
-
     for (let i = 0; i < 28; i++) {
       const piece = document.createElement('span');
       piece.className = 'confetti-piece';
@@ -431,95 +859,54 @@
   }
 
   /* ------------------------------------------------------------------
-     7. СКРЫТЫЙ АДМИН-РЕЖИМ "ЗАДАННЫЙ ПОБЕДИТЕЛЬ"
+     10. РЕЖИМ "ЗАДАННЫЙ ПОБЕДИТЕЛЬ" — Shift + F8 → admin.html
 
-     Важное техническое пояснение (честно, без имитации):
-     Веб-страница не может скрыть элемент от произвольного "захвата
-     экрана" — у браузера просто нет информации о том, что в данный
-     момент кто-то считывает его пиксели извне. Единственный случай,
-     когда страница ДЕЙСТВИТЕЛЬНО может отличить "обычного зрителя
-     вкладки" от OBS — это когда OBS подключается через источник
-     "Browser Source" (OBS рендерит страницу сам, отдельным, скрытым
-     от человека процессом, и этот процесс сообщает о себе через
-     navigator.userAgent, содержащий подстроку "OBS").
-     Если вместо этого в OBS используется "Захват окна" (Window
-     Capture) поверх обычного окна браузера — OBS копирует ровно те
-     же пиксели, что видит админ, и никакой код веб-страницы не
-     может показать админу одно, а зрителям — другое: это один и
-     тот же кадр. Поэтому для скрытности от стрима нужно добавлять
-     NeuroDraw в OBS именно как Browser Source, а не как Window
-     Capture — тогда проверка ниже отработает корректно.
+     Честно о надёжности (без имитации): веб-страница не может скрыть
+     себя от произвольного "захвата экрана" — у браузера нет сведений
+     о том, что кто-то считывает его пиксели извне. Поэтому вместо
+     попытки угадать, что мы внутри OBS (например, по user-agent — OBS
+     Browser Source по умолчанию НЕ добавляет туда ничего отличимого
+     от обычного Chrome, так что такая проверка не работает), админка
+     вынесена в отдельный документ admin.html. OBS Browser Source
+     рендерит только тот документ, что указан в источнике — если там
+     указан index.html, то содержимое admin.html физически не может
+     туда попасть, независимо от того, открыт он или нет.
      ------------------------------------------------------------------ */
 
-  /** true, если текущая страница выполняется внутри источника OBS Browser Source. */
-  function isRunningInsideOBS() {
-    return /\bOBS\b/i.test(navigator.userAgent);
+  function openAdminWindow() {
+    window.open('admin.html', 'neurodraw-admin', 'width=480,height=720,noopener,noreferrer');
   }
 
-  function openAdminModal() {
-    if (isRunningInsideOBS()) {
-      // Внутри OBS Browser Source это окно не должно появляться вообще —
-      // даже если кто-то случайно нажмёт комбинацию клавиш на сцене.
-      return;
-    }
-    $('forceWinnerToggle').checked = state.forceWinner.enabled;
-    $('forceWinnerInput').value = state.forceWinner.nickname;
-    $('forceWinnerInput').disabled = !state.forceWinner.enabled;
-    $('adminModal').hidden = false;
+  function readForceWinnerFromStorage() {
+    try {
+      const raw = localStorage.getItem('neurodraw_force_winner');
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      state.forceWinner.enabled = Boolean(parsed.enabled);
+      state.forceWinner.nickname = typeof parsed.nickname === 'string' ? parsed.nickname : '';
+      $('forceWinnerIndicator').hidden = !state.forceWinner.enabled;
+    } catch { /* игнорируем битое значение */ }
   }
 
-  function closeAdminModal() {
-    $('adminModal').hidden = true;
-  }
+  function initForceWinnerSync() {
+    readForceWinnerFromStorage();
+    // admin.html пишет в localStorage — событие 'storage' прилетает во все ДРУГИЕ
+    // открытые документы того же источника (ровно наш случай: index.html + admin.html).
+    window.addEventListener('storage', (e) => {
+      if (e.key === 'neurodraw_force_winner') readForceWinnerFromStorage();
+    });
 
-  function initAdminModeTrigger() {
-    // Способ 1: комбинация клавиш Shift + F8
     document.addEventListener('keydown', (e) => {
       if (e.shiftKey && e.key === 'F8') {
         e.preventDefault();
-        openAdminModal();
+        openAdminWindow();
       }
-      if (e.key === 'Escape') {
-        if (!$('adminModal').hidden) closeAdminModal();
-        if (!$('victoryModal').hidden) hideVictoryModal();
-      }
-    });
-
-    // Способ 2: клик по невидимому пикселю в углу табло рулетки
-    $('hiddenAdminPixel').addEventListener('click', openAdminModal);
-
-    $('adminCloseBtn').addEventListener('click', closeAdminModal);
-
-    $('adminModal').addEventListener('click', (e) => {
-      if (e.target === e.currentTarget) closeAdminModal();
-    });
-
-    $('forceWinnerToggle').addEventListener('change', (e) => {
-      $('forceWinnerInput').disabled = !e.target.checked;
-      if (e.target.checked) $('forceWinnerInput').focus();
-    });
-
-    $('adminSaveBtn').addEventListener('click', () => {
-      const enabled = $('forceWinnerToggle').checked;
-      const nickname = $('forceWinnerInput').value.trim();
-
-      if (enabled && !nickname) {
-        showToast('Введите никнейм или выключите режим', true);
-        return;
-      }
-
-      state.forceWinner.enabled = enabled;
-      state.forceWinner.nickname = nickname;
-
-      $('forceWinnerIndicator').hidden = !enabled;
-
-      closeAdminModal();
-      showToast(enabled ? `Заданный победитель: ${nickname}` : 'Режим заданного победителя выключен');
+      if (e.key === 'Escape' && !$('victoryModal').hidden) hideVictoryModal();
     });
   }
 
   /* ------------------------------------------------------------------
-     8. МОБИЛЬНОЕ МЕНЮ, ОБЩАЯ ИНИЦИАЛИЗАЦИЯ
+     11. МОБИЛЬНОЕ МЕНЮ, ОБЩАЯ ИНИЦИАЛИЗАЦИЯ
      ------------------------------------------------------------------ */
 
   function initMobileMenu() {
@@ -536,7 +923,6 @@
     $('victoryOkBtn').addEventListener('click', hideVictoryModal);
     $('victorySpinAgainBtn').addEventListener('click', () => {
       hideVictoryModal();
-      // Небольшая пауза перед повторным запуском, чтобы модалка успела закрыться
       setTimeout(spin, 200);
     });
     $('victoryModal').addEventListener('click', (e) => {
@@ -544,26 +930,31 @@
     });
   }
 
+  function initSpinDurationControl() {
+    // Поле свободное: подстраховываемся только от пустого/отрицательного/нечислового ввода
+    const input = $('spinDurationInput');
+    input.addEventListener('change', () => {
+      const n = parseInt(input.value, 10);
+      if (!n || n < 1) input.value = '5';
+    });
+  }
+
   function init() {
     $('footerYear').textContent = new Date().getFullYear();
 
-    // Если страница запущена внутри OBS Browser Source — помечаем body
-    // классом, чтобы CSS тоже мог спрятать служебные элементы (скрытый
-    // пиксель-триггер больше не нужен в этом рендере вообще).
-    if (isRunningInsideOBS()) {
-      document.body.classList.add('is-obs-source');
-    }
-
     initPlatformTabs();
     updatePlatformIndicator();
+    updateLinkModeHint();
     initInputModeSwitch();
     initKeywordFilterToggle();
+    initCombinedModeToggle();
+    initSpinDurationControl();
 
     $('loadParticipantsBtn').addEventListener('click', handleLoadParticipants);
     $('spinBtn').addEventListener('click', spin);
 
     initVictoryModalControls();
-    initAdminModeTrigger();
+    initForceWinnerSync();
     initMobileMenu();
 
     renderReelPlaceholder('Загрузите участников, чтобы начать');
