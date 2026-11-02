@@ -48,6 +48,80 @@
     }, 3200);
   }
 
+  /* ------------------------------------------------------------------
+     История победителей — пишется со страницы index.html в тот момент,
+     когда там реально выбирается победитель; здесь только читаем,
+     показываем и даём экспортировать/очистить.
+     ------------------------------------------------------------------ */
+
+  const HISTORY_KEY = 'neurodraw_winner_history';
+
+  const PLATFORM_LABELS = {
+    youtube: 'YouTube', twitch: 'Twitch', tiktok: 'TikTok', instagram: 'Instagram', telegram: 'Telegram'
+  };
+
+  function readHistory() {
+    try {
+      const raw = localStorage.getItem(HISTORY_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function formatHistoryDate(iso) {
+    try {
+      return new Date(iso).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' });
+    } catch {
+      return iso;
+    }
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  function renderHistory() {
+    const history = readHistory();
+    const list = $('adminHistoryList');
+    const empty = $('adminHistoryEmpty');
+
+    if (history.length === 0) {
+      list.innerHTML = '';
+      empty.style.display = '';
+      return;
+    }
+
+    empty.style.display = 'none';
+    list.innerHTML = history
+      .map((entry) => `<li><strong>${escapeHtml(entry.name)}</strong> — ${escapeHtml(PLATFORM_LABELS[entry.platform] || entry.platform)} · ${escapeHtml(formatHistoryDate(entry.at))}</li>`)
+      .join('');
+  }
+
+  function csvEscape(value) {
+    const str = String(value ?? '');
+    return /[",\n;]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
+  }
+
+  function downloadHistoryCsv() {
+    const history = readHistory();
+    const rows = [['Имя', 'Платформа', 'Ссылка', 'Дата и время'], ...history.map((e) => [
+      e.name, PLATFORM_LABELS[e.platform] || e.platform, e.url || '', formatHistoryDate(e.at)
+    ])];
+    const csv = '\uFEFF' + rows.map((r) => r.map(csvEscape).join(';')).join('\r\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'neurodraw-winner-history.csv';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
   function init() {
     const toggle = $('forceWinnerToggle');
     const input = $('forceWinnerInput');
@@ -79,6 +153,20 @@
           ? `Применено: следующим победителем будет «${nickname}».`
           : 'Режим заданного победителя выключен.'
       );
+    });
+
+    renderHistory();
+    $('adminHistoryExportBtn').addEventListener('click', downloadHistoryCsv);
+    $('adminHistoryClearBtn').addEventListener('click', () => {
+      if (!confirm('Удалить всю историю победителей без возможности восстановить?')) return;
+      localStorage.removeItem(HISTORY_KEY);
+      renderHistory();
+      showStatus('История победителей очищена.');
+    });
+
+    // Если index.html дописывает историю, пока эта страница открыта в другой вкладке/окне
+    window.addEventListener('storage', (e) => {
+      if (e.key === HISTORY_KEY) renderHistory();
     });
   }
 

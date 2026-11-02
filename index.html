@@ -180,6 +180,12 @@ stream_queen
     <div class="participants-counter" id="participantsCounter" aria-live="polite">
       Участников не загружено
     </div>
+
+    <div class="participants-tools" id="participantsTools" hidden>
+      <button class="btn-link" id="togglePreviewBtn" type="button" aria-expanded="false">Показать список участников</button>
+      <button class="btn-link" id="exportParticipantsBtn" type="button">Скачать CSV</button>
+    </div>
+    <ul class="participants-preview" id="participantsPreview" hidden></ul>
   </section>
 
   <!-- ---------- ПРАВАЯ КОЛОНКА: РУЛЕТКА ---------- -->
@@ -194,18 +200,19 @@ stream_queen
         <span class="force-dot" aria-hidden="true"></span>
         Задан победитель
       </div>
+      <button class="sound-toggle" id="soundToggleBtn" type="button" aria-pressed="true" aria-label="Выключить звук">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor"/><path d="M16.5 8.5a5 5 0 0 1 0 7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
     </div>
 
-    <!-- Табло-барабан -->
-    <div class="reel-stage">
-      <div class="reel-frame">
-        <div class="reel-fade reel-fade-top" aria-hidden="true"></div>
-        <div class="reel-track" id="reelTrack">
-          <div class="reel-item reel-placeholder">Загрузите участников, чтобы начать</div>
-        </div>
-        <div class="reel-fade reel-fade-bottom" aria-hidden="true"></div>
-        <div class="reel-pointer" aria-hidden="true"></div>
+    <!-- Колесо розыгрыша -->
+    <div class="wheel-stage">
+      <div class="wheel-pointer" aria-hidden="true"></div>
+      <div class="wheel-wrap" id="wheelWrap">
+        <svg id="wheelSvg" class="wheel-svg" viewBox="0 0 320 320" aria-hidden="true"></svg>
+        <div class="wheel-hub" aria-hidden="true"></div>
       </div>
+      <p class="wheel-placeholder-text" id="wheelPlaceholderText">Загрузите участников, чтобы начать</p>
     </div>
 
     <label class="field-label" for="spinDurationInput">Время прокрутки (сек)</label>

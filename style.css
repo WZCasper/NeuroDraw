@@ -619,98 +619,83 @@ a { color: inherit; }
   background: #D97706;
 }
 
-/* ---------- Барабан рулетки ---------- */
+/* ---------- Колесо розыгрыша ---------- */
 
-.reel-stage {
+.wheel-stage {
   flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 20px 0;
-}
-
-.reel-frame {
-  position: relative;
-  width: 100%;
-  max-width: 440px;
-  height: 320px;
-  border-radius: var(--radius-lg);
-  background: var(--color-surface);
-  border: 1.5px solid var(--color-border);
-  overflow: hidden;
-}
-
-.reel-track {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 50%;
   display: flex;
   flex-direction: column;
   align-items: center;
-  will-change: transform;
-}
-
-.reel-item {
-  height: 86px;
-  display: flex;
-  align-items: center;
   justify-content: center;
-  font-size: 26px;
-  font-weight: 800;
-  letter-spacing: -0.01em;
-  color: var(--color-text-faint);
-  transition: color 0.2s ease, transform 0.2s ease;
-  padding: 0 24px;
-  text-align: center;
-  word-break: break-word;
+  gap: 14px;
+  padding: 20px 0;
 }
 
-.reel-item.is-center {
-  color: var(--color-text);
-  transform: scale(1.08);
+.wheel-wrap {
+  position: relative;
+  width: min(360px, 82vw);
+  height: min(360px, 82vw);
 }
 
-.reel-item.is-winner {
-  color: var(--color-accent-strong);
+.wheel-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  border-radius: 50%;
+  box-shadow: var(--shadow-lg), 0 0 0 6px #FFFFFF, 0 0 0 9px var(--color-border);
+  transform: rotate(0deg);
 }
 
-.reel-placeholder {
-  font-size: 15px;
-  font-weight: 500;
-  color: var(--color-text-faint);
+.wheel-svg.is-idle-empty circle {
+  fill: var(--color-surface);
 }
 
-.reel-fade {
+.wheel-hub {
   position: absolute;
-  left: 0;
-  right: 0;
-  height: 110px;
-  pointer-events: none;
+  top: 50%;
+  left: 50%;
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--gradient-accent);
+  box-shadow: var(--shadow-md), 0 0 0 4px #FFFFFF;
+}
+
+.wheel-pointer {
+  width: 0;
+  height: 0;
+  border-left: 16px solid transparent;
+  border-right: 16px solid transparent;
+  border-top: 26px solid var(--color-accent-strong);
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.25));
+  margin-bottom: -6px;
   z-index: 2;
 }
 
-.reel-fade-top {
-  top: 0;
-  background: linear-gradient(to bottom, var(--color-surface) 10%, rgba(244, 245, 247, 0));
+.wheel-placeholder-text {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-text-faint);
+  text-align: center;
 }
 
-.reel-fade-bottom {
-  bottom: 0;
-  background: linear-gradient(to top, var(--color-surface) 10%, rgba(244, 245, 247, 0));
-}
-
-.reel-pointer {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 50%;
-  height: 86px;
-  transform: translateY(-50%);
-  border-top: 2px solid var(--color-accent);
-  border-bottom: 2px solid var(--color-accent);
+.wheel-segment-label {
+  font-size: 11px;
+  font-weight: 700;
+  fill: #FFFFFF;
   pointer-events: none;
-  z-index: 1;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+
+.wheel-svg.is-spinning {
+  filter: drop-shadow(0 0 18px rgba(79, 70, 229, 0.25));
+}
+
+.is-winner-slice {
+  filter: brightness(1.18) saturate(1.1);
+  stroke: #FFFFFF;
+  stroke-width: 3;
 }
 
 /* ---------- Кнопка "Крутить" ---------- */
@@ -1247,44 +1232,103 @@ body::before {
 .platform-tab.is-active[data-platform="instagram"] { background: #FDE8F0; border-color: #E1306C; }
 .platform-tab.is-active[data-platform="telegram"] { background: #E7F6FF; border-color: #26A5E4; }
 
-/* ---------- Разноцветная рулетка ---------- */
+/* ====================================================================
+   ДОБАВЛЕНО: предпросмотр участников, экспорт CSV, переключатель звука,
+   эффект финального замедления рулетки
+   ==================================================================== */
 
-.reel-frame {
-  background: linear-gradient(180deg, #FDFCFF 0%, #FAFAFF 100%);
-  box-shadow: inset 0 0 0 1px var(--color-border), var(--shadow-md);
+.participants-tools {
+  display: flex;
+  gap: 16px;
+  margin-top: 8px;
 }
 
-.reel-item {
-  margin: 3px 14px;
+.btn-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.btn-link:hover { color: var(--color-accent-strong); }
+
+.participants-preview {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  max-height: 180px;
+  overflow-y: auto;
+  border: 1.5px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-surface);
-  transition: color 0.2s ease, transform 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+  font-size: 13px;
+  color: var(--color-text-muted);
 }
 
-.reel-item:nth-child(5n+1) { background: linear-gradient(135deg, #FFE8EC, #FFF5F6); color: #D6336C; }
-.reel-item:nth-child(5n+2) { background: linear-gradient(135deg, #EAE4FF, #F5F2FF); color: #6D28D9; }
-.reel-item:nth-child(5n+3) { background: linear-gradient(135deg, #E0FBFF, #F0FDFF); color: #0E7490; }
-.reel-item:nth-child(5n+4) { background: linear-gradient(135deg, #FFF3DB, #FFFAF0); color: #B45309; }
-.reel-item:nth-child(5n+5) { background: linear-gradient(135deg, #E3FBE9, #F2FEF5); color: #15803D; }
-
-.reel-item.is-center {
-  transform: scale(1.1);
-  box-shadow: var(--shadow-md);
+.participants-preview li {
+  padding: 3px 0;
+  border-bottom: 1px dashed var(--color-border);
 }
 
-.reel-item.is-winner {
-  background: var(--gradient-accent);
-  color: #FFFFFF;
-  box-shadow: var(--shadow-lg);
+.participants-preview li:last-child { border-bottom: none; }
+
+.sound-toggle {
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-pill);
+  border: 1.5px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
 }
 
-.reel-placeholder,
-.reel-placeholder:nth-child(5n+1),
-.reel-placeholder:nth-child(5n+2),
-.reel-placeholder:nth-child(5n+3),
-.reel-placeholder:nth-child(5n+4),
-.reel-placeholder:nth-child(5n+5) {
-  background: transparent;
-  color: var(--color-text-faint);
-  box-shadow: none;
+.sound-toggle svg { width: 18px; height: 18px; }
+
+.sound-toggle[aria-pressed="true"] { color: var(--color-accent); border-color: var(--color-accent); }
+
+.sound-toggle.is-muted::after {
+  content: '';
+  position: absolute;
+}
+
+
+
+/* ---------- История победителей (admin.html) ---------- */
+
+.admin-divider {
+  border: none;
+  border-top: 1px solid var(--color-border);
+  margin: 24px 0 18px;
+}
+
+.admin-history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+
+.admin-history-list li {
+  padding: 6px 0;
+  border-bottom: 1px dashed var(--color-border);
+}
+
+.admin-history-list li:last-child { border-bottom: none; }
+
+.admin-history-actions {
+  display: flex;
+  gap: 18px;
+  margin: 10px 0 18px;
 }

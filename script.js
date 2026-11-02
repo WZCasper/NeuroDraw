@@ -27,6 +27,7 @@
     combinedMode: false,           // общий розыгрыш сразу среди нескольких платформ
     participants: [],              // [{ name, url, platform }]
     isSpinning: false,
+    wheelRotation: 0,
     forceWinner: { enabled: false, nickname: '' }
   };
 
@@ -82,6 +83,68 @@
     const div = document.createElement('div');
     div.textContent = str;
     return div.innerHTML;
+  }
+
+  /* ------------------------------------------------------------------
+     2b. ЗВУК — настоящий синтез через Web Audio API, без внешних
+     аудиофайлов (не требует хостинга/лицензий). Переключатель и выбор
+     пользователя сохраняются в localStorage.
+     ------------------------------------------------------------------ */
+
+  let audioCtx = null;
+  let soundMuted = localStorage.getItem('neurodraw_sound_muted') === '1';
+
+  function getAudioCtx() {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return null;
+    if (!audioCtx) audioCtx = new Ctx();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    return audioCtx;
+  }
+
+  function playTone(freq, startOffset, duration, type, peakGain) {
+    if (soundMuted) return;
+    const ctx = getAudioCtx();
+    if (!ctx) return;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = type || 'sine';
+    osc.frequency.value = freq;
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    const t0 = ctx.currentTime + startOffset;
+    gain.gain.setValueAtTime(0, t0);
+    gain.gain.linearRampToValueAtTime(peakGain ?? 0.18, t0 + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + duration);
+    osc.start(t0);
+    osc.stop(t0 + duration + 0.05);
+  }
+
+  function playStopTick() {
+    playTone(440, 0, 0.12, 'triangle', 0.15);
+  }
+
+  function playWinnerChime() {
+    playTone(523.25, 0, 0.18, 'sine', 0.2);   // C5
+    playTone(659.25, 0.12, 0.18, 'sine', 0.2); // E5
+    playTone(783.99, 0.24, 0.32, 'sine', 0.22); // G5
+  }
+
+  function updateSoundToggleUI() {
+    const btn = $('soundToggleBtn');
+    btn.setAttribute('aria-pressed', String(!soundMuted));
+    btn.setAttribute('aria-label', soundMuted ? 'Включить звук' : 'Выключить звук');
+    btn.classList.toggle('is-muted', soundMuted);
+  }
+
+  function initSoundToggle() {
+    updateSoundToggleUI();
+    $('soundToggleBtn').addEventListener('click', () => {
+      soundMuted = !soundMuted;
+      localStorage.setItem('neurodraw_sound_muted', soundMuted ? '1' : '0');
+      updateSoundToggleUI();
+      if (!soundMuted) getAudioCtx(); // разблокируем контекст по пользовательскому жесту
+    });
   }
 
   /* ------------------------------------------------------------------
@@ -189,10 +252,11 @@
       if (!state.combinedMode) {
         // Выключили общий режим — очищаем смешанный пул, чтобы не разыгрывать случайно несколько платформ сразу
         state.participants = [];
-        renderReelPlaceholder('Загрузите участников, чтобы начать');
+        renderWheelPlaceholder('Загрузите участников, чтобы начать');
         $('participantsCounter').textContent = 'Участников не загружено';
         $('participantsCounter').classList.remove('has-count');
         $('spinBtn').disabled = true;
+        updateParticipantsTools();
       }
       renderCombinedBreakdown();
     });
@@ -276,7 +340,8 @@
       counter.textContent = 'Участников не найдено — проверьте фильтры';
       counter.classList.remove('has-count');
       $('spinBtn').disabled = true;
-      renderReelPlaceholder('Участники не найдены');
+      renderWheelPlaceholder('Участники не найдены');
+      updateParticipantsTools();
       return;
     }
 
@@ -296,14 +361,73 @@
       counter.textContent = 'Участников не загружено';
       counter.classList.remove('has-count');
       $('spinBtn').disabled = true;
-      renderReelPlaceholder('Загрузите участников, чтобы начать');
+      renderWheelPlaceholder('Загрузите участников, чтобы начать');
+      updateParticipantsTools();
       return;
     }
 
     counter.textContent = `Загружено участников: ${state.participants.length}`;
     counter.classList.add('has-count');
     $('spinBtn').disabled = false;
-    renderReelIdle();
+    renderWheelIdle();
+    updateParticipantsTools();
+  }
+
+  /* ------------------------------------------------------------------
+     ПРЕДПРОСМОТР СПИСКА УЧАСТНИКОВ + ЭКСПОРТ CSV
+     ------------------------------------------------------------------ */
+
+  function updateParticipantsTools() {
+    $('participantsTools').hidden = state.participants.length === 0;
+    if (state.participants.length === 0) {
+      $('participantsPreview').hidden = true;
+      $('togglePreviewBtn').textContent = 'Показать список участников';
+      $('togglePreviewBtn').setAttribute('aria-expanded', 'false');
+    } else if (!$('participantsPreview').hidden) {
+      renderParticipantsPreview();
+    }
+  }
+
+  function renderParticipantsPreview() {
+    const list = $('participantsPreview');
+    list.innerHTML = state.participants
+      .map((p) => `<li>${escapeHtml(p.name)}${state.combinedMode ? ` · ${escapeHtml(PLATFORM_LABELS[p.platform] || p.platform)}` : ''}</li>`)
+      .join('');
+  }
+
+  function initParticipantsTools() {
+    $('togglePreviewBtn').addEventListener('click', () => {
+      const preview = $('participantsPreview');
+      const isHidden = preview.hidden;
+      preview.hidden = !isHidden;
+      $('togglePreviewBtn').setAttribute('aria-expanded', String(isHidden));
+      $('togglePreviewBtn').textContent = isHidden ? 'Скрыть список участников' : 'Показать список участников';
+      if (isHidden) renderParticipantsPreview();
+    });
+
+    $('exportParticipantsBtn').addEventListener('click', () => {
+      downloadCsv('neurodraw-participants.csv', ['Имя', 'Платформа', 'Ссылка'],
+        state.participants.map((p) => [p.name, PLATFORM_LABELS[p.platform] || p.platform, p.url || '']));
+    });
+  }
+
+  function csvEscape(value) {
+    const str = String(value ?? '');
+    return /[",\n;]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
+  }
+
+  function downloadCsv(filename, headers, rows) {
+    const lines = [headers, ...rows].map((row) => row.map(csvEscape).join(';'));
+    const csv = '\uFEFF' + lines.join('\r\n'); // BOM — чтобы Excel корректно показал кириллицу
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
   }
 
   function handleManualListLoad() {
@@ -686,29 +810,94 @@
   }
 
   /* ------------------------------------------------------------------
-     8. БАРАБАН РУЛЕТКИ
+     8. КОЛЕСО РОЗЫГРЫША
+
+     Честно о ключевом ограничении: нарисовать 1000+ читаемых секторов
+     на одном колесе физически невозможно ни в одном инструменте —
+     буквы сольются в кашу. Поэтому на колесе показывается не более
+     WHEEL_MAX_SEGMENTS секторов. Если участников меньше или равно
+     этому числу — показаны ВСЕ, по одному сектору на каждого. Если
+     больше — победитель (выбранный по-настоящему случайно из ВСЕГО
+     пула участников, не только из видимых секторов) гарантированно
+     входит в отображаемый набор, а остальные сектора — честная
+     случайная выборка реальных участников из того же пула. Никаких
+     придуманных имён на колесе никогда не бывает.
      ------------------------------------------------------------------ */
 
-  const ITEM_HEIGHT = 86;
-  const ITEM_HEIGHT_MOBILE = 70;
+  const WHEEL_MAX_SEGMENTS = 24;
+  const WHEEL_COLORS = ['#F43F5E', '#7C3AED', '#0EA5E9', '#F59E0B', '#10B981', '#EC4899', '#6366F1', '#14B8A6'];
+  const WHEEL_RADIUS = 150;
+  const WHEEL_CX = 160;
+  const WHEEL_CY = 160;
 
-  function currentItemHeight() {
-    return window.matchMedia('(max-width: 640px)').matches ? ITEM_HEIGHT_MOBILE : ITEM_HEIGHT;
+  function polarToCartesian(cx, cy, r, angleDeg) {
+    const a = ((angleDeg - 90) * Math.PI) / 180; // 0° = верх (12 часов)
+    return { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) };
   }
 
-  function renderReelPlaceholder(text) {
-    const track = $('reelTrack');
-    track.style.transform = 'translateY(0)';
-    track.innerHTML = `<div class="reel-item reel-placeholder">${escapeHtml(text)}</div>`;
+  function describeSlicePath(cx, cy, r, startAngle, endAngle) {
+    const start = polarToCartesian(cx, cy, r, endAngle);
+    const end = polarToCartesian(cx, cy, r, startAngle);
+    const largeArc = endAngle - startAngle <= 180 ? 0 : 1;
+    return `M ${cx} ${cy} L ${start.x.toFixed(2)} ${start.y.toFixed(2)} A ${r} ${r} 0 ${largeArc} 0 ${end.x.toFixed(2)} ${end.y.toFixed(2)} Z`;
   }
 
-  function renderReelIdle() {
-    const track = $('reelTrack');
-    const preview = state.participants.slice(0, 5);
-    track.style.transform = `translateY(${-currentItemHeight() / 2}px)`;
-    track.innerHTML = preview
-      .map((p, i) => `<div class="reel-item${i === 0 ? ' is-center' : ''}">${escapeHtml(p.name)}</div>`)
+  function truncateLabel(name) {
+    return name.length > 14 ? `${name.slice(0, 13)}…` : name;
+  }
+
+  function renderWheelPlaceholder(text) {
+    $('wheelPlaceholderText').textContent = text;
+    $('wheelPlaceholderText').hidden = false;
+    $('wheelWrap').style.visibility = 'hidden';
+    const svg = $('wheelSvg');
+    svg.innerHTML = '';
+    svg.style.transform = 'rotate(0deg)';
+  }
+
+  /** Выбирает реальный набор участников для показа на колесе (см. пояснение выше класса). */
+  function buildWheelSegments(winner) {
+    const pool = state.participants;
+    if (pool.length <= WHEEL_MAX_SEGMENTS) {
+      const segments = [...pool].sort(() => Math.random() - 0.5);
+      return { segments, winnerIndex: segments.indexOf(winner) };
+    }
+    const others = pool.filter((p) => p !== winner);
+    const sampleSize = WHEEL_MAX_SEGMENTS - 1;
+    const sampled = [...others].sort(() => Math.random() - 0.5).slice(0, sampleSize);
+    const segments = [...sampled, winner].sort(() => Math.random() - 0.5);
+    return { segments, winnerIndex: segments.indexOf(winner) };
+  }
+
+  function renderWheel(segments, highlightIndex) {
+    const svg = $('wheelSvg');
+    const anglePer = 360 / segments.length;
+    svg.innerHTML = segments
+      .map((p, i) => {
+        const startAngle = i * anglePer;
+        const endAngle = startAngle + anglePer;
+        const midAngle = startAngle + anglePer / 2;
+        const color = WHEEL_COLORS[i % WHEEL_COLORS.length];
+        const labelPos = polarToCartesian(WHEEL_CX, WHEEL_CY, WHEEL_RADIUS * 0.62, midAngle);
+        const textRotation = midAngle > 90 && midAngle < 270 ? midAngle + 180 : midAngle;
+        const isWinnerSlice = i === highlightIndex;
+        return `
+          <path d="${describeSlicePath(WHEEL_CX, WHEEL_CY, WHEEL_RADIUS, startAngle, endAngle)}"
+                fill="${color}" stroke="#ffffff" stroke-width="2"
+                class="${isWinnerSlice ? 'is-winner-slice' : ''}"></path>
+          <text class="wheel-segment-label" x="${labelPos.x.toFixed(2)}" y="${labelPos.y.toFixed(2)}"
+                text-anchor="middle" dominant-baseline="middle"
+                transform="rotate(${textRotation.toFixed(2)} ${labelPos.x.toFixed(2)} ${labelPos.y.toFixed(2)})">${escapeHtml(truncateLabel(p.name))}</text>
+        `;
+      })
       .join('');
+  }
+
+  function renderWheelIdle() {
+    $('wheelPlaceholderText').hidden = true;
+    $('wheelWrap').style.visibility = 'visible';
+    const { segments } = buildWheelSegments(state.participants[0]);
+    renderWheel(segments, -1);
   }
 
   function resolveWinner() {
@@ -723,36 +912,9 @@
     return pickRandom(state.participants);
   }
 
-  function buildReelSequence(winner) {
-    const pool = state.participants;
-    const REPEAT_ROUNDS = 4;
-    const sequence = [];
-    for (let round = 0; round < REPEAT_ROUNDS; round++) {
-      sequence.push(...[...pool].sort(() => Math.random() - 0.5));
-    }
-    const tailLength = Math.min(6, Math.max(3, pool.length));
-    for (let i = 0; i < tailLength; i++) sequence.push(pickRandom(pool));
-    sequence.push(winner);
-    return sequence;
-  }
-
-  function highlightCenterItem(track, items, itemHeight) {
-    const matrix = window.WebKitCSSMatrix ? new WebKitCSSMatrix(getComputedStyle(track).transform) : null;
-    let translateY;
-    if (matrix) {
-      translateY = matrix.m42;
-    } else {
-      const style = getComputedStyle(track).transform;
-      const match = /matrix\(([^)]+)\)/.exec(style);
-      translateY = match ? parseFloat(match[1].split(',')[5]) : 0;
-    }
-    const centerIndex = Math.round((-translateY - itemHeight / 2) / itemHeight);
-    items.forEach((item, i) => item.classList.toggle('is-center', i === centerIndex));
-  }
-
   function currentSpinDurationMs() {
     const seconds = parseInt($('spinDurationInput').value, 10) || 5;
-    return seconds * 1000;
+    return Math.max(1, seconds) * 1000;
   }
 
   function spin() {
@@ -769,42 +931,51 @@
     $('spinBtnLabel').textContent = 'Крутится…';
 
     const winner = resolveWinner();
-    const sequence = buildReelSequence(winner);
+    const { segments, winnerIndex } = buildWheelSegments(winner);
+    const anglePer = 360 / segments.length;
 
-    const track = $('reelTrack');
-    const itemHeight = currentItemHeight();
+    const svg = $('wheelSvg');
+    renderWheel(segments, -1);
+    svg.classList.add('is-spinning');
 
-    track.innerHTML = sequence.map((p) => `<div class="reel-item">${escapeHtml(p.name)}</div>`).join('');
-    const items = track.querySelectorAll('.reel-item');
-    const winnerIndex = sequence.length - 1;
-
-    track.style.transition = 'none';
-    track.style.transform = `translateY(${-itemHeight / 2}px)`;
-    // eslint-disable-next-line no-unused-expressions
-    track.offsetHeight;
-
-    const finalOffset = -(winnerIndex * itemHeight) - itemHeight / 2;
     const spinDuration = currentSpinDurationMs();
+    const spinSeconds = spinDuration / 1000;
+    // Больше оборотов для долгих прокруток, чтобы не выглядело вяло; разумный потолок
+    const revolutions = Math.min(400, Math.max(6, Math.round(spinSeconds / 2)));
 
+    const targetCenterAngle = winnerIndex * anglePer + anglePer / 2;
+    const finalMod = (360 - targetCenterAngle + 360) % 360;
+    const baseFloor = Math.floor(state.wheelRotation / 360) * 360;
+    let finalRotation = baseFloor + revolutions * 360 + finalMod;
+    if (finalRotation <= state.wheelRotation) finalRotation += 360;
+
+    svg.style.transition = `transform ${spinDuration}ms cubic-bezier(0.14, 0.7, 0.12, 1)`;
     requestAnimationFrame(() => {
-      track.style.transition = `transform ${spinDuration}ms cubic-bezier(0.12, 0.72, 0.1, 1)`;
-      track.style.transform = `translateY(${finalOffset}px)`;
+      svg.style.transform = `rotate(${finalRotation}deg)`;
     });
 
-    const highlightInterval = setInterval(() => highlightCenterItem(track, items, itemHeight), 80);
-
     setTimeout(() => {
-      clearInterval(highlightInterval);
-      highlightCenterItem(track, items, itemHeight);
-      items[winnerIndex].classList.add('is-winner');
+      state.wheelRotation = finalRotation;
+      renderWheel(segments, winnerIndex);
+      playStopTick();
+      svg.classList.remove('is-spinning');
+
+      // Драматичное "оседание": небольшой перелёт дальше точки остановки и мягкий отскок назад
+      const overshootDeg = 6;
+      svg.style.transition = 'transform 140ms ease-in';
+      svg.style.transform = `rotate(${finalRotation + overshootDeg}deg)`;
+      setTimeout(() => {
+        svg.style.transition = 'transform 300ms cubic-bezier(0.34, 1.56, 0.64, 1)';
+        svg.style.transform = `rotate(${finalRotation}deg)`;
+      }, 140);
 
       spinBtn.disabled = false;
       spinBtn.classList.remove('is-spinning');
       $('spinBtnLabel').textContent = 'Выбрать победителя';
 
       state.isSpinning = false;
-      showVictoryModal(winner);
-    }, spinDuration + 120);
+      setTimeout(() => showVictoryModal(winner), 480);
+    }, spinDuration + 60);
   }
 
   /* ------------------------------------------------------------------
@@ -836,6 +1007,31 @@
 
     $('victoryModal').hidden = false;
     spawnConfetti();
+    playWinnerChime();
+    saveWinnerToHistory(winner);
+  }
+
+  /* ------------------------------------------------------------------
+     ИСТОРИЯ ПОБЕДИТЕЛЕЙ — хранится в localStorage этого браузера,
+     без срока жизни (пока сам не очистишь в admin.html). Читается
+     и экспортируется в CSV из admin.html, т.к. это панель ведущего.
+     ------------------------------------------------------------------ */
+
+  const WINNER_HISTORY_KEY = 'neurodraw_winner_history';
+  const WINNER_HISTORY_MAX = 200;
+
+  function saveWinnerToHistory(winner) {
+    try {
+      const raw = localStorage.getItem(WINNER_HISTORY_KEY);
+      const history = raw ? JSON.parse(raw) : [];
+      history.unshift({
+        name: winner.name,
+        platform: winner.platform || state.platform,
+        url: winner.url || null,
+        at: new Date().toISOString()
+      });
+      localStorage.setItem(WINNER_HISTORY_KEY, JSON.stringify(history.slice(0, WINNER_HISTORY_MAX)));
+    } catch { /* localStorage недоступен/переполнен — история не критична для работы сайта */ }
   }
 
   function hideVictoryModal() {
@@ -949,6 +1145,8 @@
     initKeywordFilterToggle();
     initCombinedModeToggle();
     initSpinDurationControl();
+    initParticipantsTools();
+    initSoundToggle();
 
     $('loadParticipantsBtn').addEventListener('click', handleLoadParticipants);
     $('spinBtn').addEventListener('click', spin);
@@ -957,7 +1155,7 @@
     initForceWinnerSync();
     initMobileMenu();
 
-    renderReelPlaceholder('Загрузите участников, чтобы начать');
+    renderWheelPlaceholder('Загрузите участников, чтобы начать');
   }
 
   document.addEventListener('DOMContentLoaded', init);
