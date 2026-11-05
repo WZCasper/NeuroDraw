@@ -19,6 +19,27 @@
 </head>
 <body>
 
+<!-- Декоративный фон: чисто визуальные элементы, не являются реальными данными -->
+<div class="bg-decor" aria-hidden="true">
+  <span class="bg-chip bg-pos-1">🏆 @lucky_star</span>
+  <span class="bg-chip bg-pos-2">🎉 @mega_fan21</span>
+  <span class="bg-chip bg-pos-3">✨ winner2026</span>
+  <span class="bg-chip bg-pos-4">🔥 @stream_vip</span>
+
+  <span class="bg-icon bg-pos-5" style="color:#FF0000;"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M21.6 7.2c-.25-1-1-1.75-2-2C17.9 4.7 12 4.7 12 4.7s-5.9 0-7.6.5c-1 .25-1.75 1-2 2C2 8.9 2 12 2 12s0 3.1.4 4.8c.25 1 1 1.75 2 2 1.7.5 7.6.5 7.6.5s5.9 0 7.6-.5c1-.25 1.75-1 2-2 .4-1.7.4-4.8.4-4.8s0-3.1-.4-4.8z" fill="currentColor"/><path d="M10 15.2V8.8L15.8 12 10 15.2z" fill="#fff"/></svg></span>
+  <span class="bg-icon bg-pos-6" style="color:#9146FF;"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4.5 2.5 3 6.5v13h5v2.5l3-2.5h4L20.5 14V2.5h-16z" fill="currentColor"/></svg></span>
+  <span class="bg-icon bg-pos-7" style="color:#26A5E4;"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M2.5 11.3 20.8 4c.9-.35 1.7.2 1.4 1.55l-2.95 13.9c-.2.95-.8 1.2-1.6.75l-4.4-3.25-2.15 2.05c-.25.25-.45.45-.9.45l.3-4.5L18.5 7.3c.35-.3-.1-.5-.5-.2L8.3 13.15l-4.35-1.35c-.95-.3-.95-.95.2-1.5z" fill="currentColor"/></svg></span>
+  <span class="bg-icon bg-pos-8" style="color:#E1306C;"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="2.5" y="2.5" width="19" height="19" rx="5.5" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="12" r="4.5" stroke="currentColor" stroke-width="1.8"/><circle cx="17.3" cy="6.7" r="1.1" fill="currentColor"/></svg></span>
+
+  <span class="bg-emoji bg-pos-9">🎁</span>
+  <span class="bg-emoji bg-pos-10">🎊</span>
+  <span class="bg-emoji bg-pos-11">🥳</span>
+
+  <svg class="bg-mini-wheel bg-pos-12" viewBox="0 0 100 100"><circle cx="50" cy="50" r="46" fill="none" stroke="#F43F5E" stroke-width="10" stroke-dasharray="36 108" transform="rotate(-90 50 50)"/><circle cx="50" cy="50" r="46" fill="none" stroke="#0EA5E9" stroke-width="10" stroke-dasharray="36 108" stroke-dashoffset="-36" transform="rotate(-90 50 50)"/><circle cx="50" cy="50" r="46" fill="none" stroke="#F59E0B" stroke-width="10" stroke-dasharray="36 108" stroke-dashoffset="-72" transform="rotate(-90 50 50)"/><circle cx="50" cy="50" r="46" fill="none" stroke="#10B981" stroke-width="10" stroke-dasharray="36 108" stroke-dashoffset="-108" transform="rotate(-90 50 50)"/></svg>
+  <svg class="bg-mini-wheel bg-pos-13" viewBox="0 0 100 100"><circle cx="50" cy="50" r="46" fill="none" stroke="#7C3AED" stroke-width="10" stroke-dasharray="48 96" transform="rotate(-90 50 50)"/><circle cx="50" cy="50" r="46" fill="none" stroke="#EC4899" stroke-width="10" stroke-dasharray="48 96" stroke-dashoffset="-48" transform="rotate(-90 50 50)"/></svg>
+</div>
+
+
 <!-- ============================================================
      ШАПКА (HEADER)
      ============================================================ -->
@@ -212,7 +233,6 @@ stream_queen
         <svg id="wheelSvg" class="wheel-svg" viewBox="0 0 320 320" aria-hidden="true"></svg>
         <div class="wheel-hub" aria-hidden="true"></div>
       </div>
-      <p class="wheel-placeholder-text" id="wheelPlaceholderText">Загрузите участников, чтобы начать</p>
     </div>
 
     <label class="field-label" for="spinDurationInput">Время прокрутки (сек)</label>

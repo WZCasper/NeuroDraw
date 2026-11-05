@@ -847,12 +847,14 @@
   }
 
   function renderWheelPlaceholder(text) {
-    $('wheelPlaceholderText').textContent = text;
-    $('wheelPlaceholderText').hidden = false;
-    $('wheelWrap').style.visibility = 'hidden';
     const svg = $('wheelSvg');
-    svg.innerHTML = '';
     svg.style.transform = 'rotate(0deg)';
+    svg.innerHTML = `
+      <circle cx="${WHEEL_CX}" cy="${WHEEL_CY}" r="${WHEEL_RADIUS - 2}" class="wheel-idle-circle"></circle>
+      <foreignObject x="30" y="110" width="260" height="100">
+        <div xmlns="http://www.w3.org/1999/xhtml" class="wheel-idle-label">${escapeHtml(text)}</div>
+      </foreignObject>
+    `;
   }
 
   /** Выбирает реальный набор участников для показа на колесе (см. пояснение выше класса). */
@@ -894,8 +896,6 @@
   }
 
   function renderWheelIdle() {
-    $('wheelPlaceholderText').hidden = true;
-    $('wheelWrap').style.visibility = 'visible';
     const { segments } = buildWheelSegments(state.participants[0]);
     renderWheel(segments, -1);
   }
