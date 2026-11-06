@@ -1427,7 +1427,10 @@ body::before {
 }
 
 @media (max-width: 760px) {
-  .bg-chip, .bg-icon, .bg-emoji, .bg-mini-wheel { display: none; }
+  .bg-chip { display: none; } /* текстовые бейджи с никами мешали бы читать текст на узком экране */
+  .bg-icon { width: 30px; height: 30px; opacity: 0.14; }
+  .bg-emoji { font-size: 24px; opacity: 0.28; }
+  .bg-mini-wheel { width: 58px; height: 58px; opacity: 0.12; }
 }
 
 @media (prefers-reduced-motion: reduce) {
